@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 
-/** Copyable command block (the landing install step). Clipboard API only — on
- * the rare denial the visitor selects the text, which `select-all` makes a
- * single click. */
-export function CopyBlock({ text }: { text: string }) {
+/** Copyable command block (the landing install step, and the LLM audit prompt).
+ * Clipboard API only — on the rare denial the visitor selects the text, which
+ * `select-all` makes a single click. */
+export function CopyBlock({ text, label = 'Copy command' }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -25,7 +25,7 @@ export function CopyBlock({ text }: { text: string }) {
           );
         }}
       >
-        {copied ? 'Copied ✓' : 'Copy command'}
+        {copied ? 'Copied ✓' : label}
       </button>
     </div>
   );
