@@ -1,0 +1,90 @@
+import type { FastifyInstance } from 'fastify';
+import { afterEach, describe, expect, it } from 'vitest';
+import { HOST, makeTestApp, mockGateGet } from './helpers/gate-nock';
+
+interface SymbolRow {
+  symbol: string;
+  exchange: string;
+  base: string;
+  quote: string;
+  tickSize: string;
+}
+
+describe('GET /api/symbols', () => {
+  let app: FastifyInstance;
+  afterEach(async () => {
+    await app?.close();
+  });
+
+  it('?q=eth matches base case-insensitively (live FUTURE rows only)', async () => {
+    app = makeTestApp();
+    mockGateGet('/rule/symbols', { fixture: 'rule-symbols.json' });
+
+    const res = await app.inject({ method: 'GET', url: '/api/symbols?q=eth', headers: HOST });
+
+    expect(res.statusCode).toBe(200);
+    const rows: SymbolRow[] = res.json().data;
+    expect(rows.map((r) => r.symbol).sort()).toEqual([
+      'BINANCE_FUTURE_ETH_USDT',
+      'BYBIT_FUTURE_ETH_USDT',
+      'GATE_FUTURE_ETH_USDT',
+      'OKX_FUTURE_ETH_USDT',
+    ]); // GATE_SPOT_ETH_USDT is filtered out (not FUTURE)
+    expect(rows.every((r) => r.base === 'ETH')).toBe(true);
+  });
+
+  it('?exchange=GATE matches exactly; delisting symbols are excluded', async () => {
+    app = makeTestApp();
+    mockGateGet('/rule/symbols', { fixture: 'rule-symbols.json' });
+
+    const res = await app.inject({ method: 'GET', url: '/api/symbols?exchange=GATE', headers: HOST });
+
+    const rows: SymbolRow[] = res.json().data;
+    expect(rows.map((r) => r.symbol).sort()).toEqual(['GATE_FUTURE_ETH_USDT', 'GATE_FUTURE_SOL_USDT']);
+    // GATE_FUTURE_DOGE_USDT (state=delisting) never appears.
+  });
+
+  it('?multiOnly=1 keeps multi-venue bases and drops singles', async () => {
+    app = makeTestApp();
+    mockGateGet('/rule/symbols', { fixture: 'rule-symbols.json' });
+
+    const res = await app.inject({ method: 'GET', url: '/api/symbols?multiOnly=1', headers: HOST });
+
+    const rows: SymbolRow[] = res.json().data;
+    const bases = new Set(rows.map((r) => r.base));
+    expect(bases.has('ETH')).toBe(true); // 4 venues
+    expect(bases.has('BTC')).toBe(true); // HYPERLIQUID + KRAKEN — cross-quote still one base
+    expect(bases.has('SOL')).toBe(false); // GATE only
+  });
+
+  it('GET /api/symbols/:symbol merges the rule with leverageMax from risk limits', async () => {
+    app = makeTestApp();
+    mockGateGet('/rule/symbols', { fixture: 'rule-symbols.json' });
+    mockGateGet('/rule/risk_limits', { fixture: 'risk-limits.json' });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/symbols/GATE_FUTURE_ETH_USDT',
+      headers: HOST,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const { data } = res.json();
+    expect(data.symbol).toBe('GATE_FUTURE_ETH_USDT');
+    expect(data.exchange).toBe('GATE');
+    expect(data.tickSize).toBe('0.01');
+    expect(data.leverageMax).toBe(50); // max over the tiers' leverage_max (50, 20)
+  });
+
+  it('GET /api/symbols/:symbol unknown → 400 symbol-invalid envelope', async () => {
+    app = makeTestApp();
+    mockGateGet('/rule/symbols', { fixture: 'rule-symbols.json' });
+
+    const res = await app.inject({ method: 'GET', url: '/api/symbols/NOPE_FUTURE_X_USDT', headers: HOST });
+
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error.category).toBe('symbol-invalid');
+  });
+});

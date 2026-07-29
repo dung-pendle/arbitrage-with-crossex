@@ -1,0 +1,24 @@
+node_modules/
+# secrets — ignore every .env variant, but keep the placeholder template
+.env*
+!.env.example
+*.log
+# execution journal + any local SQLite (full trading history — local only)
+data/
+*.sqlite*
+# first-run disclaimer acceptance — written next to the .env, which in a source
+# checkout IS the repo root. Committing it would ship a pre-accepted disclaimer:
+# every clone would satisfy the gate without ever being shown DISCLAIMER.md.
+disclaimer.json
+# design scratch (not part of the shipped app)
+web/design/
+# live-suite artifacts
+tests/live/reports/
+tests/live/.last-run.json
+tests/live/.data-*/
+# recorded fixtures from live runs — contain REAL account data, never commit
+tests/fixtures/gate/recorded/
+# build output
+web/dist/
+# local tooling state
+.claude/

@@ -1,0 +1,88 @@
+/** Envelope-aware fetch helper. Unwraps { ok, data, meta } and throws a typed
+ * ApiError (carrying category/message/hint/retryable) on { ok: false } or
+ * transport-level failures. */
+import { IS_LANDING } from '../lib/landing';
+import type { ClassifiedError, Envelope } from './types';
+
+export class ApiError extends Error {
+  readonly category: ClassifiedError['category'];
+  readonly label?: string;
+  readonly retryable: boolean;
+  readonly hint?: string;
+  readonly httpStatus?: number;
+
+  constructor(err: ClassifiedError) {
+    super(err.message);
+    this.name = 'ApiError';
+    this.category = err.category;
+    this.label = err.label;
+    this.retryable = err.retryable;
+    this.hint = err.hint;
+    this.httpStatus = err.httpStatus;
+  }
+}
+
+/** Resolve /api paths against the page origin so requests work in the browser
+ * (Vite dev proxy → localhost:6688) AND in jsdom/msw tests (absolute URLs).
+ * The landing build resolves against the page URL instead — prefix-agnostic, so
+ * the public site works at a domain root or behind any proxy path. */
+function apiUrl(path: string): string {
+  if (IS_LANDING && typeof window !== 'undefined' && window.location) {
+    return new URL(`./api${path}`, window.location.href).toString();
+  }
+  const origin =
+    typeof window !== 'undefined' && window.location ? window.location.origin : 'http://localhost:6688';
+  return new URL(`/api${path}`, origin).toString();
+}
+
+export async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  let resp: Response;
+  try {
+    resp = await fetch(apiUrl(path), {
+      credentials: 'same-origin',
+      ...init,
+      headers: {
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch (err) {
+    throw new ApiError({
+      category: 'network',
+      message: `network error calling ${path}: ${(err as Error).message ?? String(err)}`,
+      retryable: true,
+      hint: IS_LANDING
+        ? 'The live rates feed is briefly unreachable — it retries automatically.'
+        : 'Is the backend running on localhost:6688?',
+    });
+  }
+
+  let body: unknown = null;
+  try {
+    body = await resp.json();
+  } catch {
+    /* non-JSON body (proxy error page, empty 404, …) — handled below */
+  }
+
+  if (body !== null && typeof body === 'object' && 'ok' in (body as Record<string, unknown>)) {
+    const env = body as Envelope<T>;
+    if (env.ok) return env.data;
+    throw new ApiError({ httpStatus: resp.status, ...env.error });
+  }
+
+  // No recognizable envelope — synthesize a transport error.
+  throw new ApiError({
+    category: resp.status === 401 || resp.status === 403 ? 'auth' : 'unknown',
+    message: `${path} returned HTTP ${resp.status}${body ? ' with an unexpected body' : ''}`,
+    httpStatus: resp.status,
+    retryable: resp.status >= 500,
+  });
+}
+
+export const del = <T>(path: string): Promise<T> => fetchJson<T>(path, { method: 'DELETE' });
+
+export const putJson = <T>(path: string, body: unknown): Promise<T> =>
+  fetchJson<T>(path, { method: 'PUT', body: JSON.stringify(body) });
+
+export const postJson = <T>(path: string, body: unknown): Promise<T> =>
+  fetchJson<T>(path, { method: 'POST', body: JSON.stringify(body) });

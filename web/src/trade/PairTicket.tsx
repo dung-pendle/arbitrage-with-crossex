@@ -1,0 +1,410 @@
+/**
+ * Delta-neutral pair ticket: one coin, a LONG venue and a SHORT venue, one
+ * notional-per-leg. Two execution modes:
+ *  - "Both market": both legs MARKET opens (taker × 2), submitted concurrently.
+ *  - "Maker + hedge": one leg rests post-only one bid–ask gap BEHIND the touch
+ *    (maker fee) and the engine auto-fires market hedges on the other leg as it
+ *    fills; the maker venue is auto-chosen to minimize total fees (no manual
+ *    override).
+ * Both legs run at their own venue's max leverage. Execute is inline hold-to-
+ * confirm — no review modal — so the maker price stays live until t=submit.
+ */
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSymbolDetail, useSymbolsByBase } from '../api/queries';
+import type { ActionInput, PreviewResult, RestEstimate } from '../api/types';
+import { SegmentedToggle } from '../components/SegmentedToggle';
+import { fmtUsd } from '../lib/fmt';
+import { uuid } from '../lib/uuid';
+import { ExecuteControl } from './ExecuteControl';
+import { estimateMargin } from './previewBits';
+import {
+  MakerHedgeControls,
+  PairPreview,
+  VenueRow,
+  type ExecMode,
+  type TimeoutChoice,
+} from './PairTicketBits';
+import { PairBookImpact } from './PriceImpactGraph';
+import { CoinCombobox } from './SymbolCombobox';
+import { useTradeFlowOptional } from './TradeFlow';
+import { usePreviewDebounced } from './usePreview';
+
+/** The default maker resting price: one bid–ask gap BEHIND the touch (BUY at
+ * bid − gap, SELL at ask + gap). Both edges sit on the venue tick so the offset
+ * does too; toFixed re-round kills FP noise. Degenerate books (one-sided,
+ * crossed, or an offset that would go non-positive) fall back to the plain
+ * same-side touch. Mirrors the engine's venueGate.touch. */
+function restOffsetPrice(rest: RestEstimate, isBuy: boolean): number {
+  const { bestBid: bid, bestAsk: ask } = rest;
+  const touch = isBuy ? bid : ask;
+  if (!Number.isFinite(bid) || !Number.isFinite(ask) || ask <= bid) return touch;
+  const px = isBuy ? 2 * bid - ask : 2 * ask - bid;
+  return px > 0 ? Number(px.toFixed(12)) : touch;
+}
+
+export function PairTicket() {
+  const [base, setBase] = useState<string | null>(null);
+  const [longSym, setLongSym] = useState<string | null>(null);
+  const [shortSym, setShortSym] = useState<string | null>(null);
+  const [notionalStr, setNotionalStr] = useState('');
+  const [nonce, setNonce] = useState(0);
+  const flow = useTradeFlowOptional();
+  const [mode, setMode] = useState<ExecMode>('maker');
+  const [makerPriceStr, setMakerPriceStr] = useState('');
+  /** True once the user typed a price — stop auto-tracking the touch. */
+  const [pricePinned, setPricePinned] = useState(false);
+  const [timeoutSec, setTimeoutSec] = useState<TimeoutChoice>('300');
+
+  const venues = useSymbolsByBase(base);
+  const longDetail = useSymbolDetail(longSym);
+  const shortDetail = useSymbolDetail(shortSym);
+
+  // --- Strategy-box prefill ("Open the perp legs") --------------------------
+  // Two phases keyed on the prefill nonce: set base+notional+mode immediately, then
+  // resolve venue → symbol once the base's symbol rules arrive. A venue with no
+  // CrossEx symbol stays unselected (the normal picker takes over).
+  const prefill = flow?.pairPrefill ?? null;
+  const [prefillDone, setPrefillDone] = useState(0);
+  // The nonce whose base phase 2 has OBSERVED applied — phase 1's setBase
+  // lands one commit later, so the very first phase-2 run still sees the old
+  // base and must not be mistaken for the user navigating away.
+  const prefillBaseSeen = useRef(0);
+  useEffect(() => {
+    if (!prefill || prefill.nonce <= prefillDone) return;
+    setBase(prefill.base);
+    setLongSym(null);
+    setShortSym(null);
+    setNotionalStr(String(Math.max(1, Math.round(prefill.notionalUsd))));
+    // Same invariant as the manual mode toggle: a mode switch un-pins the price
+    // so the maker leg resumes tracking the touch.
+    if (prefill.mode) {
+      setMode(prefill.mode);
+      setPricePinned(false);
+    }
+  }, [prefill, prefillDone]);
+  useEffect(() => {
+    if (!prefill || prefill.nonce <= prefillDone) return;
+    if (base !== prefill.base) {
+      // The user moved on to another coin after the prefill's base had been
+      // applied — abandon it instead of leaving it armed to fire later.
+      if (prefillBaseSeen.current === prefill.nonce) setPrefillDone(prefill.nonce);
+      return;
+    }
+    prefillBaseSeen.current = prefill.nonce;
+    // keepPreviousData serves the PREVIOUS base's rows while this base loads —
+    // resolving venues against those would arm the wrong coin's symbols.
+    if (!venues.data || venues.isPlaceholderData) return;
+    const rules = venues.data.filter((r) => r.base === prefill.base);
+    const symFor = (venue: string | null) =>
+      venue ? (rules.find((r) => r.exchange === venue)?.symbol ?? null) : null;
+    setLongSym(symFor(prefill.longVenue));
+    setShortSym(symFor(prefill.shortVenue));
+    setPrefillDone(prefill.nonce);
+  }, [prefill, prefillDone, base, venues.data, venues.isPlaceholderData]);
+
+  // Regenerated whenever the legs change or a pair was executed, so two
+  // executed pairs never share a group.
+  const pairGroupId = useMemo(
+    () => uuid(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [longSym, shortSym, nonce],
+  );
+
+  const notionalNum = Number(notionalStr);
+  const notionalOk = Number.isFinite(notionalNum) && notionalNum > 0;
+  // Leverage is PER LEG at each venue's own max. The caps differ (e.g. HL 5x vs
+  // Bybit 20x), margin is shared cross-collateral, and a delta-neutral pair's
+  // uPnL nets — so min(maxA, maxB) would only reserve extra IM on the higher-cap
+  // venue without reducing any risk.
+  const levLong = longDetail.data?.leverageMax || undefined;
+  const levShort = shortDetail.data?.leverageMax || undefined;
+
+  // Preview results are needed BELOW for the maker auto-choice; note the [long,
+  // short] positional order is preserved in BOTH modes so previews[0] is always
+  // the LONG leg. The chooser reads only per-venue fee RATES, which don't depend
+  // on the current mode/roles — so the choice can't oscillate with the preview.
+  const [previewLegs, setPreviewLegs] = useState<{ legLong?: PreviewResult; legShort?: PreviewResult }>({});
+
+  const makerLegPick = useMemo<'long' | 'short'>(() => {
+    const fl = previewLegs.legLong?.fees;
+    const fs = previewLegs.legShort?.fees;
+    if (!fl || !fs) return 'long';
+    // Total fee = maker on one venue + taker on the other; pick the cheaper combo.
+    const costMakerLong = fl.makerRate + fs.takerRate;
+    const costMakerShort = fs.makerRate + fl.takerRate;
+    return costMakerShort < costMakerLong - 1e-12 ? 'short' : 'long';
+  }, [previewLegs.legLong?.fees, previewLegs.legShort?.fees]);
+
+  const actions = useMemo<ActionInput[] | null>(() => {
+    if (!longSym || !shortSym || !notionalOk) return null;
+    const levL = levLong !== undefined ? { leverage: levLong } : {};
+    const levS = levShort !== undefined ? { leverage: levShort } : {};
+    if (mode === 'market') {
+      return [
+        { kind: 'open-market', symbol: longSym, side: 'BUY', notional: notionalStr, pairGroupId, ...levL },
+        { kind: 'open-market', symbol: shortSym, side: 'SELL', notional: notionalStr, pairGroupId, ...levS },
+      ];
+    }
+    // Maker + hedge: the maker leg rests POC at makerPriceStr (auto-tracked to the
+    // touch until pinned); the other leg is the engine-fired market hedge.
+    // NOTE: pegToTouch is NOT set here (it would leak into the preview payload);
+    // it is injected at CONFIRM in `decorate` below when the price is tracking.
+    const makerIsLong = makerLegPick === 'long';
+    const makerLeg: ActionInput = {
+      kind: 'open-limit',
+      symbol: makerIsLong ? longSym : shortSym,
+      side: makerIsLong ? 'BUY' : 'SELL',
+      notional: notionalStr,
+      price: makerPriceStr,
+      tif: 'POC',
+      pairRole: 'maker',
+      makerTimeoutSec: Number(timeoutSec),
+      pairGroupId,
+      ...(makerIsLong ? levL : levS),
+    };
+    const hedgeLeg: ActionInput = {
+      kind: 'open-market',
+      symbol: makerIsLong ? shortSym : longSym,
+      side: makerIsLong ? 'SELL' : 'BUY',
+      notional: notionalStr,
+      pairRole: 'hedge',
+      pairGroupId,
+      ...(makerIsLong ? levS : levL),
+    };
+    return makerIsLong ? [makerLeg, hedgeLeg] : [hedgeLeg, makerLeg];
+  }, [longSym, shortSym, notionalOk, notionalStr, levLong, levShort, pairGroupId, mode, makerLegPick, makerPriceStr, timeoutSec]);
+
+  const preview = usePreviewDebounced('ticket-pair', actions, { debounceMs: 400, refetchInterval: 3_000 });
+  const legLong = preview.previews?.[0];
+  const legShort = preview.previews?.[1];
+  useEffect(() => {
+    setPreviewLegs({ legLong, legShort });
+  }, [legLong, legShort]);
+
+  // Auto-track the maker price to ONE bid–ask gap BEHIND the venue's touch —
+  // a BUY rests at bid − (ask − bid), a SELL at ask + (ask − bid) — until the
+  // user pins a price (the engine's t=submit peg applies the same formula
+  // server-side). Fallback chain when the maker venue's book is unavailable:
+  // the maker leg's own mid (market-mode estimate) → the HEDGE leg's mid
+  // (cross-venue, within bps — a usable starting price beats an empty input
+  // that blocks the whole ticket).
+  const makerPreviewLeg = makerLegPick === 'long' ? legLong : legShort;
+  const hedgePreviewLeg = makerLegPick === 'long' ? legShort : legLong;
+  const makerSideIsBuy = makerLegPick === 'long';
+  const touchPx = makerPreviewLeg?.restEstimate
+    ? restOffsetPrice(makerPreviewLeg.restEstimate, makerSideIsBuy)
+    : (makerPreviewLeg?.fillEstimate?.midPrice ?? hedgePreviewLeg?.fillEstimate?.midPrice);
+  const touchIsFallback = Boolean(touchPx !== undefined && !makerPreviewLeg?.restEstimate);
+  useEffect(() => {
+    if (mode !== 'maker' || pricePinned) return;
+    if (Number.isFinite(touchPx) && (touchPx as number) > 0) setMakerPriceStr(String(touchPx));
+  }, [mode, pricePinned, touchPx]);
+
+  const estimating = preview.estimating;
+
+  // Maker-mode saving vs the all-taker open, from per-venue rates × notional.
+  const makerSaving = useMemo(() => {
+    const fl = legLong?.fees;
+    const fs = legShort?.fees;
+    if (!fl || !fs || !notionalOk) return null;
+    const allTaker = fl.takerRate + fs.takerRate;
+    const chosen = makerLegPick === 'long' ? fl.makerRate + fs.takerRate : fs.makerRate + fl.takerRate;
+    return (allTaker - chosen) * notionalNum;
+  }, [legLong?.fees, legShort?.fees, makerLegPick, notionalOk, notionalNum]);
+
+  // Inject the engine-side peg ONLY at confirm and ONLY while auto-tracking: the
+  // maker rests at the fresh book-offset price computed at t=submit (same
+  // one-gap-behind-the-touch formula), not the client price.
+  const trackingMaker = mode === 'maker' && !pricePinned;
+  const decorate = (acts: ActionInput[]): ActionInput[] =>
+    trackingMaker
+      ? acts.map((a) => (a.kind === 'open-limit' && a.pairRole === 'maker' ? { ...a, pegToTouch: true } : a))
+      : acts;
+
+  const stageDone = () => setNonce((n) => n + 1); // next pair gets a fresh group id
+
+  // Total initial margin the pair posts — Σ notional/leverage over the open
+  // legs, from the same estimator the execute gate uses.
+  const marginRequired = preview.previews ? estimateMargin(preview.previews, undefined).required : null;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <CoinCombobox
+        value={base}
+        onSelect={(b) => {
+          setBase(b);
+          setLongSym(null);
+          setShortSym(null);
+        }}
+        onClear={() => {
+          setBase(null);
+          setLongSym(null);
+          setShortSym(null);
+        }}
+      />
+
+      {base && (
+        <>
+          <VenueRow
+            label="LONG venue"
+            tone="long"
+            value={longSym}
+            otherValue={shortSym}
+            onPick={(s) => setLongSym(s || null)}
+            venues={venues.data}
+            loading={venues.isPending}
+          />
+          <VenueRow
+            label="SHORT venue"
+            tone="short"
+            value={shortSym}
+            otherValue={longSym}
+            onPick={(s) => setShortSym(s || null)}
+            venues={venues.data}
+            loading={venues.isPending}
+          />
+        </>
+      )}
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="pair-notional" className="text-[11px] text-ink-400">
+          Notional per leg (USDT)
+        </label>
+        <input
+          id="pair-notional"
+          className="input num"
+          inputMode="decimal"
+          placeholder="notional per leg"
+          value={notionalStr}
+          onChange={(e) => setNotionalStr(e.target.value)}
+        />
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-ink-400">
+        <span>Leverage</span>
+        <span className="num text-ink-200">
+          {levLong !== undefined && levShort !== undefined
+            ? `${levLong}x long / ${levShort}x short (venue max)`
+            : longSym && shortSym
+              ? 'loading…'
+              : '— (venue max)'}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-ink-400">
+        <span title="Initial margin the two legs post together — each leg's notional over its leverage">
+          Margin required
+        </span>
+        <span className="num text-ink-200">
+          {marginRequired !== null ? `≈ ${fmtUsd(marginRequired, 0)}` : '—'}
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-[11px] text-ink-400">Execution</span>
+        <SegmentedToggle<ExecMode>
+          ariaLabel="Pair execution mode"
+          value={mode}
+          onChange={(m) => {
+            setMode(m);
+            setPricePinned(false);
+          }}
+          options={[
+            { value: 'market', label: 'Both market' },
+            { value: 'maker', label: 'Maker + hedge', sub: 'saves fees' },
+          ]}
+        />
+      </div>
+
+      {mode === 'maker' && (
+        <MakerHedgeControls
+          makerLegPick={makerLegPick}
+          longSym={longSym}
+          shortSym={shortSym}
+          makerSaving={makerSaving}
+          priceStr={makerPriceStr}
+          pricePinned={pricePinned}
+          touchIsFallback={touchIsFallback}
+          onPriceInput={(v) => {
+            setMakerPriceStr(v);
+            setPricePinned(true);
+          }}
+          onTrackTouch={() => setPricePinned(false)}
+          timeoutSec={timeoutSec}
+          onTimeout={setTimeoutSec}
+        />
+      )}
+
+      <PairBookImpact
+        longSym={longSym}
+        shortSym={shortSym}
+        notional={notionalStr}
+        legLong={legLong}
+        legShort={legShort}
+        estimating={estimating}
+        mode={mode}
+        makerLegPick={makerLegPick}
+        makerPriceStr={makerPriceStr}
+      />
+
+      {actions && (
+        <PairPreview
+          previews={preview.previews}
+          isError={preview.isError}
+          error={preview.error}
+          estimating={estimating}
+          legLong={legLong}
+          legShort={legShort}
+          mode={mode}
+        />
+      )}
+
+      <ExecuteControl
+        scope="ticket-pair"
+        actions={actions}
+        tone="cyan"
+        label="Execute pair ▸"
+        buttonClassName="w-full"
+        // The ticket's own preview box reviews the legs — no hover card.
+        hoverCard={false}
+        decorate={decorate}
+        // The maker price auto-tracks the touch every preview cycle; exclude it
+        // (when unpinned) from the intent identity so an auto-tick never resets
+        // the basketId — otherwise a same-intent lost-response retry could
+        // double-execute. A pinned price IS part of the intent.
+        // pairGroupId is deliberately EXCLUDED: it is a fresh uuid on every
+        // mount, so including it made the key unique per mount and the
+        // persisted pending id could never be recovered after the Single/Pair
+        // toggle (a full remount) or a reload — a lost-response retry then
+        // minted a new id the server couldn't dedupe and opened a SECOND full
+        // pair. The group id still rides in the actions (it only labels the
+        // executed legs as one group); POST /deals dedupes on the deal id alone,
+        // so a recovered resend with a different group id is still a no-op.
+        intentKey={[
+          longSym,
+          shortSym,
+          notionalStr,
+          mode,
+          makerLegPick,
+          timeoutSec,
+          pricePinned ? makerPriceStr : 'track',
+        ].join('|')}
+        // Block until BOTH venues' leverage caps are known (executing before they
+        // load would open at the account's current leverage, not the venue max),
+        // and, in maker mode, until the maker price has been tracked.
+        extraDisabled={(mode === 'maker' && !makerPriceStr) || levLong === undefined || levShort === undefined}
+        onExecuted={stageDone}
+        detail={
+          <div className="flex flex-col gap-0.5">
+            {levLong !== undefined && levShort !== undefined && (
+              <span>
+                Leverage {levLong}x long / {levShort}x short (venue max)
+              </span>
+            )}
+            {trackingMaker && <span>maker price pegs to the touch at submit</span>}
+          </div>
+        }
+      />
+    </div>
+  );
+}

@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* House look-and-feel copied from boros-tools dashboards/_shared-frontend/styles.css
+   (dark ink palette, Inter + JetBrains Mono, .num tabular numerals, chip/card/seg). */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-950 text-ink-100 font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(34, 211, 238, 0.06), transparent),
+      radial-gradient(ellipse 60% 40% at 90% 0%, rgba(16, 185, 129, 0.04), transparent);
+    background-attachment: fixed;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
+    @apply font-mono;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-ink-600;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-900 px-2.5 py-1 text-xs font-medium text-ink-300;
+  }
+
+  .chip-sm {
+    @apply px-1.5 py-0.5 text-[10px];
+  }
+
+  .seg {
+    @apply inline-flex rounded-lg border border-ink-700 bg-ink-900 p-0.5;
+  }
+
+  .seg-btn {
+    @apply rounded-md px-3 py-1 text-sm font-medium text-ink-300 transition-colors;
+  }
+
+  .seg-btn[data-active='true'] {
+    @apply bg-ink-700 text-ink-100;
+  }
+
+  .card {
+    @apply rounded-xl border border-ink-700 bg-ink-900;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ink-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-ink-600 bg-ink-800 px-3 py-1.5 text-sm font-medium text-ink-100 transition-colors hover:border-ink-500 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply border-cyan-500/50 bg-cyan-500/15 text-cyan-300 hover:border-cyan-400/60 hover:bg-cyan-500/25;
+  }
+
+  .btn-ghost-xs {
+    @apply rounded-md border border-ink-700 bg-transparent px-2 py-0.5 text-[11px] font-medium text-ink-400 transition-colors hover:border-ink-500 hover:text-ink-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-ink-700 disabled:hover:text-ink-400;
+  }
+
+  .th {
+    @apply sticky top-0 z-10 whitespace-nowrap border-b border-ink-700 bg-ink-900 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-ink-400;
+  }
+
+  /* Secondary action next to a .btn-primary (the cards' "Details" toggle). */
+  .btn-ghost {
+    @apply rounded-lg border border-ink-700 bg-transparent px-3.5 py-1.5 text-sm font-medium text-ink-300 transition-colors hover:border-ink-500 hover:text-ink-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-ink-700 disabled:hover:text-ink-300;
+  }
+
+  /* Cyan-active segmented control — the opportunity assumptions knobs. */
+  .seg-cyan .seg-btn[data-active='true'] {
+    @apply bg-cyan-500/15 text-cyan-300;
+  }
+
+  /* Ring that flashes around the credentials form when a card's Execute lands. */
+  .flash-ring {
+    @apply pointer-events-none absolute rounded-xl border-2 border-cyan-400;
+    inset: -6px;
+    box-shadow:
+      0 0 24px rgba(34, 211, 238, 0.35),
+      inset 0 0 12px rgba(34, 211, 238, 0.12);
+    animation: flashPulse 1.8s ease-out both;
+  }
+}
+
+@keyframes flashPulse {
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

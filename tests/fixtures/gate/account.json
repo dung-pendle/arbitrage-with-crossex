@@ -1,0 +1,39 @@
+{
+  "user_id": "1234567",
+  "available_margin": "612.3311",
+  "margin_balance": "993.4877",
+  "initial_margin": "375.5800",
+  "maintenance_margin": "93.8950",
+  "initial_margin_rate": "0.3780",
+  "maintenance_margin_rate": "0.0945",
+  "position_mode": "SINGLE_HOLDING",
+  "create_time": "1719400000000",
+  "update_time": "1751500000000",
+  "assets": [
+    {
+      "coin": "USDT",
+      "balance": "500.1200",
+      "equity": "498.9000",
+      "upnl": "-1.2200",
+      "available_balance": "260.0000",
+      "futures_initial_margin": "187.7900",
+      "futures_maintenance_margin": "46.9500",
+      "borrowing_initial_margin": "0",
+      "borrowing_maintenance_margin": "0",
+      "liability": "0"
+    },
+    {
+      "coin": "USDC",
+      "balance": "495.6000",
+      "equity": "494.5877",
+      "upnl": "-1.0123",
+      "available_balance": "352.3311",
+      "futures_initial_margin": "187.7900",
+      "futures_maintenance_margin": "46.9450",
+      "borrowing_initial_margin": "0",
+      "borrowing_maintenance_margin": "0",
+      "liability": "0"
+    }
+  ],
+  "account_mode": "CROSS_EXCHANGE"
+}

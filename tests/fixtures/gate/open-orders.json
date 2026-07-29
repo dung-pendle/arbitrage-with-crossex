@@ -1,0 +1,32 @@
+[
+  {
+    "user_id": "1234567",
+    "order_id": "900001",
+    "text": "arb_1751500000001",
+    "state": "NEW",
+    "symbol": "GATE_FUTURE_ETH_USDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "attribute": "",
+    "exchange_type": "GATE",
+    "business_type": "FUTURE",
+    "qty": "0.05",
+    "quote_qty": "0",
+    "price": "3050.00",
+    "time_in_force": "GTC",
+    "executed_qty": "0",
+    "executed_amount": "0",
+    "executed_avg_price": "0",
+    "fee_coin": "USDT",
+    "fee": "0",
+    "reduce_only": "false",
+    "leverage": "5",
+    "reason": "",
+    "last_executed_qty": "0",
+    "last_executed_price": "0",
+    "last_executed_amount": "0",
+    "position_side": "NONE",
+    "create_time": "1751500000000",
+    "update_time": "1751500000000"
+  }
+]

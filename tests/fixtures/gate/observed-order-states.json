@@ -1,0 +1,23 @@
+{
+  "OPEN": [
+    "mixed-basket",
+    "poc-open",
+    "smoke read"
+  ],
+  "CANCELLED": [
+    "poc-cancelled",
+    "smoke read"
+  ],
+  "FILLED": [
+    "close-ioc",
+    "market-lifecycle",
+    "mixed-basket",
+    "mixed-close-b",
+    "mixed-preopen",
+    "pair-close",
+    "pair-open"
+  ],
+  "REJECT": [
+    "smoke read"
+  ]
+}

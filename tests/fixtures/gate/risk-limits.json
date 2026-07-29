@@ -1,0 +1,23 @@
+[
+  {
+    "symbol": "GATE_FUTURE_ETH_USDT",
+    "tiers": [
+      {
+        "tier": "1",
+        "min_risk_limit_value": "0",
+        "max_risk_limit_value": "500000",
+        "quick_cal_amount": "0",
+        "leverage_max": "50",
+        "maintenance_rate": "0.005"
+      },
+      {
+        "tier": "2",
+        "min_risk_limit_value": "500000",
+        "max_risk_limit_value": "1000000",
+        "quick_cal_amount": "2500",
+        "leverage_max": "20",
+        "maintenance_rate": "0.01"
+      }
+    ]
+  }
+]
