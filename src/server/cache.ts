@@ -34,9 +34,14 @@ export const TTL = {
   /** Boros backend reads (markets, collaterals, txn history) — settlement
    * cadence is hourly at the fastest; 30s keeps the card feeling live. */
   boros: 30_000,
-  /** Boros order books — unlike the markets list these are the levels a quote
-   * actually locks, and they move with every order, so they age out far faster. */
-  borosBook: 5_000,
+  /** Boros order books — the levels the scan's DISPLAYED quote walks; nothing
+   * places an order off them (the engine trades CrossEx only, and settlement
+   * cadence on Boros is hourly). At 5s this was ~97% of all Boros traffic: the
+   * dashboard polls every 12s, so every poll re-fetched every mapped market's
+   * book (25 books × 300 polls ≈ 7.5k req/h from one open tab, measured
+   * 2026-07-29). Books now ride the same 30s cadence as every other Boros
+   * read; a scan quote up to ~30s old ranks identically. */
+  borosBook: 30_000,
   /** Public venue-book touch for the re-peg UI — price display, not a feed. */
   book: 2_000,
   /** Fee rates, symbol rules, risk limits — effectively static. */

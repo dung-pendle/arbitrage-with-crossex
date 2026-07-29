@@ -7,7 +7,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import nock from 'nock';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CoreError } from '../../src/core/errors';
 import { imInputs, raw } from '../helpers/boros-fixtures';
 import { borosStub } from '../helpers/boros-stub';
@@ -317,6 +317,34 @@ describe('GET /api/opportunities', () => {
 
     await app.inject({ method: 'GET', url: '/api/opportunities?fresh=1', headers: HOST });
     expect(calls.length).toBe(afterFirst * 2);
+  });
+
+  it('a poll one dashboard-cadence later adds NO Boros calls; past 30s it re-reads', async () => {
+    // Books must ride the same 30s cadence as every other Boros read. At the
+    // old 5s book TTL, the dashboard's 12s poll missed the cache on EVERY poll
+    // and re-fetched every mapped market's book — ~97% of all Boros traffic
+    // (25 live books × 300 polls ≈ 7.5k req/h from one open tab, 2026-07-29).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const calls: string[] = [];
+      app = makeTestApp({ borosFetch: borosStub(borosBodies(), calls) });
+      mockGate(3);
+      mockVenueBooks(3);
+
+      await app.inject({ method: 'GET', url: '/api/opportunities', headers: HOST });
+      const afterFirst = calls.length; // markets + both order books
+      expect(afterFirst).toBe(3);
+
+      vi.setSystemTime(Date.now() + 12_000); // the next dashboard poll
+      await app.inject({ method: 'GET', url: '/api/opportunities', headers: HOST });
+      expect(calls.length).toBe(afterFirst);
+
+      vi.setSystemTime(Date.now() + 20_000); // 32s after the first fetch
+      await app.inject({ method: 'GET', url: '/api/opportunities', headers: HOST });
+      expect(calls.length).toBe(afterFirst * 2); // markets + books re-read together
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('unconfigured still prices in full: public listings + leverage, only the fees assumed', async () => {
