@@ -1,10 +1,16 @@
-/** The public rail: six steps, an OS-aware install command, and the paste-into-
- * your-own-LLM audit prompt. No key surface may ever appear here. */
+/** The public rail: six steps collapsed to their titles, an OS-aware install
+ * command, and the paste-into-your-own-LLM audit prompt. No key surface may
+ * ever appear here. */
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { renderWithClient } from '../test/utils';
 import { LandingOnboardingGuide } from './LandingOnboardingGuide';
+
+/** Step titles are disclosure buttons; open the one we want to inspect. */
+async function openStep(name: RegExp) {
+  await userEvent.click(screen.getByRole('button', { name }));
+}
 
 describe('LandingOnboardingGuide', () => {
   it('leads with install, then the audit step, before anything touching Gate', () => {
@@ -19,20 +25,44 @@ describe('LandingOnboardingGuide', () => {
     expect(within(steps[4]).getByRole('heading')).toHaveTextContent('Create your API key');
   });
 
-  it('offers the audit prompt with the repo and the questions that matter for a key-holding tool', () => {
+  it('starts with every step collapsed — titles only, no bodies', () => {
     renderWithClient(<LandingOnboardingGuide />);
+
+    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(6);
+    expect(screen.queryAllByRole('button', { expanded: true })).toHaveLength(0);
+    // Bodies are mounted but hidden, so nothing inside them is reachable.
+    expect(screen.queryByRole('button', { name: 'Copy audit prompt' })).toBeNull();
+    expect(screen.getByText(/Audit this open-source tool/)).not.toBeVisible();
+  });
+
+  it('expands a step on click and collapses it again', async () => {
+    renderWithClient(<LandingOnboardingGuide />);
+
+    await openStep(/^Audit it with your own AI/);
+    const header = screen.getByRole('button', { name: /^Audit it with your own AI/ });
+    expect(header).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Copy audit prompt' })).toBeInTheDocument();
+
+    await userEvent.click(header);
+    expect(header).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Copy audit prompt' })).toBeNull();
+  });
+
+  it('offers the audit prompt with the questions that matter for a key-holding tool', async () => {
+    renderWithClient(<LandingOnboardingGuide />);
+    await openStep(/^Audit it with your own AI/);
 
     const prompt = screen.getByText(/Audit this open-source tool/);
     expect(prompt).toHaveTextContent('github.com/mrenoon/boros-crossex-terminal');
     expect(prompt).toHaveTextContent(/send my API keys.*off my machine/s);
     expect(prompt).toHaveTextContent(/withdraw funds/);
     expect(prompt).toHaveTextContent(/install\.sh \(macOS\) and install\.ps1 \(Windows\)/);
-    expect(screen.getByRole('button', { name: 'Copy audit prompt' })).toBeInTheDocument();
   });
 
   it('defaults to the macOS install command and swaps to PowerShell on demand', async () => {
     // jsdom's userAgent is not Windows, so detectOs() lands on macOS.
     renderWithClient(<LandingOnboardingGuide />);
+    await openStep(/^Install the terminal/);
 
     expect(screen.getByText(/\/bin\/bash -c/)).toBeInTheDocument();
     expect(screen.queryByText(/install\.ps1 \| iex/)).toBeNull();
@@ -44,8 +74,12 @@ describe('LandingOnboardingGuide', () => {
     expect(screen.getByText(/press Win, type PowerShell/)).toBeInTheDocument();
   });
 
-  it('never renders a credential input on the public page', () => {
+  it('never renders a credential input on the public page', async () => {
     renderWithClient(<LandingOnboardingGuide />);
+    // Even with every step opened.
+    for (const t of [/^Install the terminal/, /^Create your API key/, /^Execute/]) {
+      await openStep(t);
+    }
 
     expect(screen.queryByLabelText(/API key/i)).toBeNull();
     expect(screen.queryByLabelText(/API secret/i)).toBeNull();

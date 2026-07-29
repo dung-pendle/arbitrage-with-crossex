@@ -25,13 +25,22 @@ export function Step({
   n,
   title,
   active = false,
+  collapsible = false,
+  open = true,
+  onToggle,
   children,
 }: {
   n: number;
   title: string;
   active?: boolean;
+  /** Render the title as a disclosure button (the landing rail, where six steps
+   * of full content is more page than a visitor wants up front). */
+  collapsible?: boolean;
+  open?: boolean;
+  onToggle?: () => void;
   children: ReactNode;
 }) {
+  const bodyId = `step-body-${n}`;
   return (
     <li className="flex gap-3">
       <span
@@ -45,8 +54,36 @@ export function Step({
         {n}
       </span>
       <div className="min-w-0 flex-1">
-        <h3 className="text-[13px] font-semibold text-ink-100">{title}</h3>
-        <div className="mt-1 text-xs leading-relaxed text-ink-300">{children}</div>
+        <h3 className="text-[13px] font-semibold text-ink-100">
+          {collapsible ? (
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-controls={bodyId}
+              onClick={onToggle}
+              className="flex w-full items-center gap-2 text-left transition-colors hover:text-cyan-200"
+            >
+              <span className="min-w-0 flex-1">{title}</span>
+              <span
+                aria-hidden="true"
+                className={`shrink-0 text-[10px] text-ink-500 transition-transform ${open ? 'rotate-90' : ''}`}
+              >
+                ▶
+              </span>
+            </button>
+          ) : (
+            title
+          )}
+        </h3>
+        {/* Kept MOUNTED while collapsed (hidden attribute) so the Execute nudge
+            can still find and flash the install block inside a closed step. */}
+        <div
+          id={bodyId}
+          hidden={collapsible && !open}
+          className="mt-1 text-xs leading-relaxed text-ink-300"
+        >
+          {children}
+        </div>
       </div>
     </li>
   );
@@ -61,12 +98,19 @@ export function useNudge(nonce: number) {
 
   useEffect(() => {
     if (!nonce) return;
-    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    ref.current?.querySelector('input')?.focus({ preventScroll: true });
-    setFlash(true);
+    // Deferred a tick: the host may be opening a collapsed step on this same
+    // nonce, and scrolling to a still-hidden target does nothing.
+    const reveal = setTimeout(() => {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      ref.current?.querySelector('input')?.focus({ preventScroll: true });
+      setFlash(true);
+    }, 0);
     // Outlive the 1.8s flashPulse so the ring never cuts off mid-animation.
     const t = setTimeout(() => setFlash(false), 1900);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(reveal);
+      clearTimeout(t);
+    };
   }, [nonce]);
 
   return { ref, flash };
