@@ -154,6 +154,75 @@ export function StrategyCard({
     null;
   const longVenue = venueForSide('LONG');
   const shortVenue = venueForSide('SHORT');
+
+  // Sizing gate: while the 4-leg book is still being BUILT — a Boros leg
+  // unmatched, the perp pair lopsided, or the two layers sized apart — the
+  // headline numbers would be confidently wrong (a full-life spread projection
+  // on half the notional reads as a great trade). Hide APR / Capital / PNL by
+  // maturity and show how to COMPLETE the hedge instead. Current PnL stays:
+  // real cash + MtM, whatever the book's shape. Thresholds mirror
+  // src/core/boros/returns.ts (the server computes the verdict; these only
+  // pick which cue lines to show).
+  const checks = s.hedgeChecks;
+  const pct = (r: number) => `${Math.round(r * 100)}%`;
+  const hedgeCues: string[] = [];
+  if (!checks.fullyHedged) {
+    const sideSum = (kind: 'perp' | 'boros', side: 'LONG' | 'SHORT'): number =>
+      s.legs
+        .filter((l) => l.kind === kind && l.side === side)
+        .reduce((sum, l) => sum + l.notionalUsd, 0);
+    const bLong = sideSum('boros', 'LONG');
+    const bShort = sideSum('boros', 'SHORT');
+    const pLong = sideSum('perp', 'LONG');
+    const pShort = sideSum('perp', 'SHORT');
+    const grossBoros = bLong + bShort;
+    const grossPerp = pLong + pShort;
+    if (!(checks.borosMatchRatio > 0.9)) {
+      if (bLong === 0 || bShort === 0) {
+        const missing = bLong === 0 ? 'pay-fixed (LONG)' : 'receive-fixed (SHORT)';
+        hedgeCues.push(
+          `Boros ${missing} leg is missing — lock ~${fmtUsd(Math.max(bLong, bShort), 0)} on the other side of the spread.`,
+        );
+      } else {
+        const smaller = bLong < bShort ? 'LONG' : 'SHORT';
+        hedgeCues.push(
+          `Boros legs are ${pct(checks.borosMatchRatio)} matched — add ~${fmtUsd(Math.abs(bLong - bShort), 0)} to the ${smaller} side.`,
+        );
+      }
+    }
+    if (!(checks.perpMatchRatio > 0.9)) {
+      if (perpSource === null) {
+        hedgeCues.push('Connect the Gate account to verify the perp side of the hedge.');
+      } else if (grossPerp === 0) {
+        hedgeCues.push(
+          `No perp legs yet — hedge the floating side (~${fmtUsd(grossBoros / 2, 0)} per side).`,
+        );
+      } else if (pLong === 0 || pShort === 0) {
+        const side = pLong === 0 ? 'LONG' : 'SHORT';
+        const venue = venueForSide(side);
+        hedgeCues.push(
+          `Perp ${side} leg is missing — open ~${fmtUsd(Math.max(pLong, pShort), 0)}${venue ? ` on ${venue}` : ''}.`,
+        );
+      } else {
+        const smaller = pLong < pShort ? 'LONG' : 'SHORT';
+        hedgeCues.push(
+          `Perp legs are ${pct(checks.perpMatchRatio)} matched — adjust the ${smaller} leg by ~${fmtUsd(Math.abs(pLong - pShort), 0)}.`,
+        );
+      }
+    }
+    if (!(checks.borosVsPerpRatio > 0.8) && perpSource !== null && grossPerp > 0) {
+      hedgeCues.push(
+        grossPerp < grossBoros
+          ? `The perp book is ${pct(checks.borosVsPerpRatio)} of the Boros book — add ~${fmtUsd(grossBoros - grossPerp, 0)} of perp notional.`
+          : `The Boros book is ${pct(checks.borosVsPerpRatio)} of the perp book — add ~${fmtUsd(grossPerp - grossBoros, 0)} of Boros notional.`,
+      );
+    }
+  }
+  const hiddenStat = (
+    <span className="num text-ink-400" title="Hidden until the position is fully hedged — see the sizing note below">
+      —
+    </span>
+  );
   const borosNotionalPerSide = borosLegs.reduce((sum, l) => sum + l.notionalUsd, 0) / 2;
   const matured = s.secondsToMaturity === 0;
   const borosOnly = perpLegs.length === 0 && perpSource !== null;
@@ -392,7 +461,9 @@ export function StrategyCard({
         >
           <div className="flex flex-wrap items-end gap-x-10 gap-y-3 p-3">
         <Stat label="Fixed APR on capital" hero>
-          {fixedAprOnCapital === null ? (
+          {!checks.fullyHedged ? (
+            hiddenStat
+          ) : fixedAprOnCapital === null ? (
             <span className="num text-ink-400" title="The strategy start or capital is unknown — no APR">
               —
             </span>
@@ -403,10 +474,16 @@ export function StrategyCard({
           )}
         </Stat>
         <Stat label="Capital">
-          <span className="num text-ink-100">{fmtUsd(s.capitalUsd, 0)}</span>
+          {!checks.fullyHedged ? (
+            hiddenStat
+          ) : (
+            <span className="num text-ink-100">{fmtUsd(s.capitalUsd, 0)}</span>
+          )}
         </Stat>
         <Stat label={matured ? 'PNL (realized at maturity)' : 'PNL by maturity'}>
-          {expectedUsd === null ? (
+          {!checks.fullyHedged ? (
+            hiddenStat
+          ) : expectedUsd === null ? (
             <span className="num text-ink-400" title="The strategy start is unknown — no projection">
               —
             </span>
@@ -421,6 +498,21 @@ export function StrategyCard({
           </Stat>
           </div>
         </button>
+
+        {!checks.fullyHedged && (
+          <div className="border-t border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[12px] leading-relaxed text-amber-300/90">
+            <span className="font-medium">Position not fully hedged — numbers appear once the book is complete.</span>{' '}
+            Boros legs {pct(checks.borosMatchRatio)} matched · perp legs {pct(checks.perpMatchRatio)} matched ·
+            Boros↔perp sizing {pct(checks.borosVsPerpRatio)}.
+            {hedgeCues.length > 0 && (
+              <ul className="mt-1 list-disc pl-4">
+                {hedgeCues.map((cue) => (
+                  <li key={cue}>{cue}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* The waterfalls uncollapse INSIDE the box, between the stats and
             the strip. */}

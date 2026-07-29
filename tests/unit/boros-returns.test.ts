@@ -784,3 +784,59 @@ describe('buildStrategies — multiple cohorts', () => {
     );
   });
 });
+
+describe('buildStrategies — hedgeChecks sizing gate', () => {
+  // The gate behind the UI's headline numbers (APR / capital / PnL by
+  // maturity): a book still being built must not show a full-life spread
+  // projection computed on the wrong notional.
+  it('canonical 4-leg book: fully hedged, every ratio 1', () => {
+    const s = buildStrategies(input()).strategies[0];
+    expect(s.hedgeChecks).toEqual({
+      borosMatchRatio: 1,
+      perpMatchRatio: 1,
+      borosVsPerpRatio: 1,
+      fullyHedged: true,
+    });
+  });
+
+  it('a missing perp leg zeroes the perp ratio and closes the gate', () => {
+    const s = buildStrategies(input({ perpPositions: [ethPerps()[0]] })).strategies[0];
+    expect(s.hedgeChecks.perpMatchRatio).toBe(0);
+    expect(s.hedgeChecks.fullyHedged).toBe(false);
+  });
+
+  it('a one-sided Boros book zeroes the boros ratio and closes the gate', () => {
+    const zones = ethZones();
+    zones[0].cross!.marketPositions = zones[0].cross!.marketPositions.filter(
+      (p) => p.marketId === 155,
+    );
+    const s = buildStrategies(input({ zones })).strategies[0];
+    expect(s.hedgeChecks.borosMatchRatio).toBe(0);
+    expect(s.hedgeChecks.fullyHedged).toBe(false);
+  });
+
+  it('layers sized apart close the gate at 80%, strictly', () => {
+    const sized = (value: string) =>
+      ethPerps().map((p) => ({ ...p, positionValue: value }));
+    // Matched $700k perps against the $2M Boros book: 1.4/2 = 0.7 → closed.
+    const under = buildStrategies(input({ perpPositions: sized('700000') })).strategies[0];
+    expect(under.hedgeChecks.perpMatchRatio).toBe(1);
+    expect(under.hedgeChecks.borosVsPerpRatio).toBeCloseTo(0.7, 10);
+    expect(under.hedgeChecks.fullyHedged).toBe(false);
+    // $800k exactly is 0.8 — NOT > 0.8, still closed (strict thresholds).
+    const edge = buildStrategies(input({ perpPositions: sized('800000') })).strategies[0];
+    expect(edge.hedgeChecks.borosVsPerpRatio).toBeCloseTo(0.8, 10);
+    expect(edge.hedgeChecks.fullyHedged).toBe(false);
+    // $850k clears it: 1.7/2 = 0.85 → open.
+    const ok = buildStrategies(input({ perpPositions: sized('850000') })).strategies[0];
+    expect(ok.hedgeChecks.borosVsPerpRatio).toBeCloseTo(0.85, 10);
+    expect(ok.hedgeChecks.fullyHedged).toBe(true);
+  });
+
+  it('an invisible perp side (Boros-only view) closes the gate — unverifiable is not hedged', () => {
+    const s = buildStrategies(input({ perpPositions: null })).strategies[0];
+    expect(s.hedgeChecks.perpMatchRatio).toBe(0);
+    expect(s.hedgeChecks.borosVsPerpRatio).toBe(0);
+    expect(s.hedgeChecks.fullyHedged).toBe(false);
+  });
+});

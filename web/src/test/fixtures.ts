@@ -308,6 +308,7 @@ export function makeStrategyRollup(overrides: Partial<StrategyRollup> = {}): Str
     maturity: STRATEGY_MATURITY,
     legs: hypeLegs(),
     hedge: 'hedged',
+    hedgeChecks: { borosMatchRatio: 1, perpMatchRatio: 1, borosVsPerpRatio: 1, fullyHedged: true },
     capitalUsd: 41_320,
     // Σ leg nets (−34.18 + 16.95 − 9.28 − 39.24) − entry slippage 49.16.
     realizedPnlUsd: -114.91,

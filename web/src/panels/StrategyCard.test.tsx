@@ -415,3 +415,66 @@ describe('StrategyCard — states', () => {
     expect(screen.queryByTitle(/Assumes .* locked on/)).not.toBeInTheDocument();
   });
 });
+
+describe('StrategyCard — sizing gate', () => {
+  // While the 4-leg book is being built, the headline numbers are hidden and
+  // replaced by completion cues; Current PnL (real cash + MtM) stays visible.
+  const buildingLegs = () => [
+    makeStrategyLeg({ kind: 'perp', venue: 'BYBIT', side: 'LONG', notionalUsd: 300_000 }),
+    makeStrategyLeg({ kind: 'perp', venue: 'HYPERLIQUID', side: 'SHORT', notionalUsd: 300_000 }),
+    makeStrategyLeg({ kind: 'boros', venue: 'HYPERLIQUID', side: 'LONG', notionalUsd: 200_000 }),
+    makeStrategyLeg({ kind: 'boros', venue: 'BYBIT', side: 'SHORT', notionalUsd: 500_000 }),
+  ];
+
+  it('hides APR / Capital / PNL and cues the Boros gap while the book is being built', () => {
+    render(
+      card({
+        legs: buildingLegs(),
+        hedgeChecks: {
+          borosMatchRatio: 0.4,
+          perpMatchRatio: 1,
+          borosVsPerpRatio: 0.857,
+          fullyHedged: false,
+        },
+      }),
+    );
+    expect(screen.queryByText('$41,320')).toBeNull(); // capital hidden
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText(/Position not fully hedged/)).toBeInTheDocument();
+    expect(screen.getByText(/Boros legs 40% matched/)).toBeInTheDocument();
+    // The cue names the exact gap, side, and amount — no thresholds in the copy.
+    expect(screen.getByText(/add ~\$300,000 to the LONG side/)).toBeInTheDocument();
+    expect(screen.getByText('Current PnL')).toBeInTheDocument();
+  });
+
+  it('cues a missing perp leg with its venue and size', () => {
+    render(
+      card({
+        legs: [
+          makeStrategyLeg({ kind: 'perp', venue: 'BYBIT', side: 'LONG', notionalUsd: 160_000 }),
+          makeStrategyLeg({ kind: 'boros', venue: 'HYPERLIQUID', side: 'SHORT', notionalUsd: 160_000 }),
+          makeStrategyLeg({ kind: 'boros', venue: 'BYBIT', side: 'LONG', notionalUsd: 160_000 }),
+        ],
+        hedgeChecks: { borosMatchRatio: 1, perpMatchRatio: 0, borosVsPerpRatio: 0.5, fullyHedged: false },
+      }),
+    );
+    expect(screen.getByText(/Perp SHORT leg is missing — open ~\$160,000 on HYPERLIQUID/)).toBeInTheDocument();
+    expect(screen.getByText(/The perp book is 50% of the Boros book — add ~\$160,000 of perp notional/)).toBeInTheDocument();
+  });
+
+  it('cues connecting Gate when the perp side is invisible', () => {
+    render(
+      card(
+        { hedgeChecks: { borosMatchRatio: 1, perpMatchRatio: 0, borosVsPerpRatio: 0, fullyHedged: false } },
+        { perpSource: null },
+      ),
+    );
+    expect(screen.getByText(/Connect the Gate account to verify the perp side/)).toBeInTheDocument();
+  });
+
+  it('shows the numbers and no note when fully hedged (the fixture default)', () => {
+    render(card());
+    expect(screen.getByText('$41,320')).toBeInTheDocument();
+    expect(screen.queryByText(/Position not fully hedged/)).toBeNull();
+  });
+});

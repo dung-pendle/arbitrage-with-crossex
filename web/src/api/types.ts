@@ -244,6 +244,17 @@ export interface StrategyRollup {
   maturity: number;
   legs: StrategyLeg[];
   hedge: HedgeStatus;
+  /** Sizing gate for the headline numbers: all three ratios (matched/larger)
+   * must clear their thresholds — Boros legs > 0.9, perp legs > 0.9,
+   * Boros↔perp > 0.8 — before APR / capital / PnL-by-maturity are shown.
+   * A position still being entered would otherwise show confidently wrong
+   * numbers (a full-life spread projection on half the notional). */
+  hedgeChecks: {
+    borosMatchRatio: number;
+    perpMatchRatio: number;
+    borosVsPerpRatio: number;
+    fullyHedged: boolean;
+  };
   capitalUsd: number;
   /** Σ leg nets − entry slippage (pair-level). Perp price MtM is excluded. */
   realizedPnlUsd: number;

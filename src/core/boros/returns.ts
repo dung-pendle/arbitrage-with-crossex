@@ -143,6 +143,30 @@ export interface StrategyFees {
 
 export type HedgeStatus = 'hedged' | 'partial' | 'unhedged';
 
+/**
+ * The three sizing checks that must ALL pass before the strategy's headline
+ * numbers (APR on capital, capital, PnL by maturity) describe a real 4-leg
+ * position rather than one still being built. Each ratio is matched/larger
+ * (min/max), 0 when a side is absent entirely:
+ *  - `borosMatchRatio`  — LONG-fixed vs SHORT-fixed Boros notional (> 0.9);
+ *  - `perpMatchRatio`   — LONG vs SHORT perp notional (> 0.9);
+ *  - `borosVsPerpRatio` — gross Boros vs gross perp notional (> 0.8).
+ * `fullyHedged` is false whenever the perp side is not visible at all
+ * (perpSource null): an unverifiable hedge is not a hedge. This is distinct
+ * from `hedge`, the per-venue floating-cancellation band — that one asks "do
+ * the venue rates cancel", this one asks "is the whole book actually built".
+ */
+export interface HedgeChecks {
+  borosMatchRatio: number;
+  perpMatchRatio: number;
+  borosVsPerpRatio: number;
+  fullyHedged: boolean;
+}
+
+export const BOROS_LEG_MATCH_MIN = 0.9;
+export const PERP_LEG_MATCH_MIN = 0.9;
+export const BOROS_VS_PERP_MATCH_MIN = 0.8;
+
 /** What anchors the realized-APR annualization clock. Default: the strategy
  * starts when its Boros legs lock the spread — the perp pair may have existed
  * long before as a plain funding arb. */
@@ -154,6 +178,8 @@ export interface StrategyRollup {
   maturity: number;
   legs: StrategyLeg[];
   hedge: HedgeStatus;
+  /** Sizing gate for the headline numbers — see HedgeChecks. */
+  hedgeChecks: HedgeChecks;
   capitalUsd: number;
   realizedPnlUsd: number;
   /** Annualized realized return on capital; null when too early / unknowable. */
@@ -493,6 +519,32 @@ function assembleStrategy(
     hedge = anyVenueOutOfBand ? 'partial' : 'hedged';
   }
 
+  // --- Sizing gate for the headline numbers ---------------------------------
+  // APR-on-capital, capital and PnL-by-maturity all assume the spread is
+  // locked on a BUILT book. While the position is still being entered (one
+  // Boros leg filled, hedge lagging, perps sized differently), those numbers
+  // are confidently wrong — e.g. the full-life spread projection on half the
+  // notional. The ratios are matched/larger per check; the perp side counts 0
+  // when invisible, because an unverifiable hedge is not a hedge.
+  const sideSum = (ls: StrategyLeg[], side: StrategyLeg['side']): number =>
+    ls.filter((l) => l.side === side).reduce((s, l) => s + l.notionalUsd, 0);
+  const matchRatio = (a: number, b: number): number => {
+    const hi = Math.max(a, b);
+    return hi > 0 ? Math.min(a, b) / hi : 0;
+  };
+  const grossBoros = borosLegs.reduce((s, l) => s + l.notionalUsd, 0);
+  const grossPerp = perpAvailable ? perpLegs.reduce((s, l) => s + l.notionalUsd, 0) : 0;
+  const hedgeChecks: HedgeChecks = {
+    borosMatchRatio: matchRatio(sideSum(borosLegs, 'LONG'), sideSum(borosLegs, 'SHORT')),
+    perpMatchRatio: perpAvailable ? matchRatio(sideSum(perpLegs, 'LONG'), sideSum(perpLegs, 'SHORT')) : 0,
+    borosVsPerpRatio: matchRatio(grossBoros, grossPerp),
+    fullyHedged: false, // set below from the three ratios
+  };
+  hedgeChecks.fullyHedged =
+    hedgeChecks.borosMatchRatio > BOROS_LEG_MATCH_MIN &&
+    hedgeChecks.perpMatchRatio > PERP_LEG_MATCH_MIN &&
+    hedgeChecks.borosVsPerpRatio > BOROS_VS_PERP_MATCH_MIN;
+
   // --- Capital ---------------------------------------------------------------
   // Perp side: initial margin of the matched legs (positions sit on shared
   // CrossEx collateral; IM is what the pair actually consumes). Boros side:
@@ -688,6 +740,7 @@ function assembleStrategy(
     maturity,
     legs,
     hedge,
+    hedgeChecks,
     capitalUsd,
     realizedPnlUsd,
     realizedApr,
