@@ -57,10 +57,12 @@ export function PositionsHome() {
   // Boros-only cue → prefill the pair ticket. Mapping: the perp side equals
   // the Boros side at the same venue (both cancel that venue's floating rate).
   // Sizing: the larger Boros side (identical to Σ/2 for the canonical 2-leg
-  // book, and the full leg size when only one Boros leg exists so far).
+  // book, and the full leg size when only one Boros leg exists so far) — or
+  // the caller's explicit notional when the complete-the-hedge CTA passes the
+  // per-leg top-up (the ticket must land sized to the GAP, not the whole book).
   const openPerpLegs =
     flow &&
-    ((s: StrategyRollup) => {
+    ((s: StrategyRollup, notionalUsd?: number) => {
       const borosLegs = s.legs.filter((l) => l.kind === 'boros');
       const sideNotional = (side: 'LONG' | 'SHORT') =>
         borosLegs.filter((l) => l.side === side).reduce((sum, l) => sum + l.notionalUsd, 0);
@@ -68,7 +70,7 @@ export function PositionsHome() {
         base: s.base,
         longVenue: borosLegs.find((l) => l.side === 'LONG')?.venue ?? null,
         shortVenue: borosLegs.find((l) => l.side === 'SHORT')?.venue ?? null,
-        notionalUsd: Math.max(sideNotional('LONG'), sideNotional('SHORT')),
+        notionalUsd: notionalUsd ?? Math.max(sideNotional('LONG'), sideNotional('SHORT')),
       });
     });
 

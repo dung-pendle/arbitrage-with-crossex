@@ -104,8 +104,11 @@ export function StrategyCard({
   perpSource: 'connected-gate-account' | null;
   /** symbol → live CrossexPosition (4s poll) for perp rows and actions. */
   livePositions?: Map<string, CrossexPosition>;
-  /** Boros-only cue: prefill the pair ticket with this strategy's perp legs. */
-  onOpenPerpLegs?: (s: StrategyRollup) => void;
+  /** Prefill the pair ticket with this strategy's perp legs — the Boros-only
+   * cue (full size) and the complete-the-hedge CTA (which passes the per-leg
+   * top-up as `notionalUsd` so the ticket lands sized to the GAP, not the
+   * whole book). */
+  onOpenPerpLegs?: (s: StrategyRollup, notionalUsd?: number) => void;
 }) {
   const s = strategy;
   // The two waterfalls sit behind the hero boxes / See-more toggle — collapsed
@@ -166,6 +169,11 @@ export function StrategyCard({
   const checks = s.hedgeChecks;
   const pct = (r: number) => `${Math.round(r * 100)}%`;
   const hedgeCues: string[] = [];
+  // When BOTH perp legs lag their Boros legs, one pair trade closes the gap —
+  // sized to the SMALLER deficit, the largest top-up that overshoots neither
+  // leg (a one-sided gap is a single order's job, not a pair's). Fuels the
+  // "Execute a pair" CTA in the sizing note.
+  let pairTopUpUsd: number | null = null;
   if (!checks.fullyHedged) {
     const sideSum = (kind: 'perp' | 'boros', side: 'LONG' | 'SHORT'): number =>
       s.legs
@@ -205,17 +213,43 @@ export function StrategyCard({
         );
       } else {
         const smaller = pLong < pShort ? 'LONG' : 'SHORT';
+        const venue = venueForSide(smaller);
         hedgeCues.push(
-          `Perp legs are ${pct(checks.perpMatchRatio)} matched — adjust the ${smaller} leg by ~${fmtUsd(Math.abs(pLong - pShort), 0)}.`,
+          `Perp legs are ${pct(checks.perpMatchRatio)} matched — open ~${fmtUsd(Math.abs(pLong - pShort), 0)} more ${smaller}${venue ? ` on ${venue}` : ''}.`,
         );
       }
     }
     if (!(checks.borosVsPerpRatio > 0.8) && perpSource !== null && grossPerp > 0) {
-      hedgeCues.push(
-        grossPerp < grossBoros
-          ? `The perp book is ${pct(checks.borosVsPerpRatio)} of the Boros book — add ~${fmtUsd(grossBoros - grossPerp, 0)} of perp notional.`
-          : `The Boros book is ${pct(checks.borosVsPerpRatio)} of the perp book — add ~${fmtUsd(grossPerp - grossBoros, 0)} of Boros notional.`,
-      );
+      if (grossPerp < grossBoros) {
+        // Per-LEG deficits, never one aggregate number: each perp leg's target
+        // is the Boros leg at its OWN venue (that is the floating rate it
+        // cancels), so "how much more to open" is answered per venue+side.
+        const deficits = borosLegs
+          .map((b) => ({
+            venue: b.venue,
+            side: b.side,
+            missingUsd:
+              b.notionalUsd -
+              perpLegs.filter((p) => p.venue === b.venue).reduce((s, p) => s + p.notionalUsd, 0),
+          }))
+          .filter((d) => d.missingUsd >= 1);
+        if (deficits.some((d) => d.side === 'LONG') && deficits.some((d) => d.side === 'SHORT')) {
+          pairTopUpUsd = Math.min(...deficits.map((d) => d.missingUsd));
+        }
+        hedgeCues.push(
+          `The perp book is ${pct(checks.borosVsPerpRatio)} of the Boros book — open ` +
+            (deficits.length
+              ? deficits
+                  .map((d) => `~${fmtUsd(d.missingUsd, 0)} more ${d.side} on ${d.venue}`)
+                  .join(' and ')
+              : `~${fmtUsd(grossBoros - grossPerp, 0)} more of perp notional`) +
+            '.',
+        );
+      } else {
+        hedgeCues.push(
+          `The Boros book is ${pct(checks.borosVsPerpRatio)} of the perp book — add ~${fmtUsd(grossPerp - grossBoros, 0)} of Boros notional.`,
+        );
+      }
     }
   }
   const hiddenStat = (
@@ -518,6 +552,16 @@ export function StrategyCard({
                   <li key={cue}>{cue}</li>
                 ))}
               </ul>
+            )}
+            {pairTopUpUsd !== null && !matured && onOpenPerpLegs && (
+              <button
+                type="button"
+                className="btn-primary mt-2 !py-1 !px-3 text-sm"
+                title={`Prefills the pair ticket at ${fmtUsd(pairTopUpUsd, 0)} per leg on this strategy's venues — the largest top-up that overshoots neither leg. Any residual single-leg gap keeps its cue above.`}
+                onClick={() => onOpenPerpLegs(s, pairTopUpUsd ?? undefined)}
+              >
+                Execute a pair to complete the hedge →
+              </button>
             )}
           </div>
         )}

@@ -459,7 +459,93 @@ describe('StrategyCard — sizing gate', () => {
       }),
     );
     expect(screen.getByText(/Perp SHORT leg is missing — open ~\$160,000 on HYPERLIQUID/)).toBeInTheDocument();
-    expect(screen.getByText(/The perp book is 50% of the Boros book — add ~\$160,000 of perp notional/)).toBeInTheDocument();
+    // The sizing cue names the exact missing LEG (Bybit is already matched).
+    expect(
+      screen.getByText(/The perp book is 50% of the Boros book — open ~\$160,000 more SHORT on HYPERLIQUID\./),
+    ).toBeInTheDocument();
+  });
+
+  it('an undersized perp pair cues the exact top-up for EACH leg', () => {
+    // Both perp legs exist but small: every cue must say how much more to open
+    // per venue+side, never one aggregate "add $X of perp notional".
+    render(
+      card({
+        legs: [
+          makeStrategyLeg({ kind: 'perp', venue: 'HYPERLIQUID', side: 'SHORT', notionalUsd: 200_000 }),
+          makeStrategyLeg({ kind: 'perp', venue: 'OKX', side: 'LONG', notionalUsd: 300_000 }),
+          makeStrategyLeg({ kind: 'boros', venue: 'HYPERLIQUID', side: 'SHORT', notionalUsd: 500_000 }),
+          makeStrategyLeg({ kind: 'boros', venue: 'OKX', side: 'LONG', notionalUsd: 500_000 }),
+        ],
+        hedgeChecks: {
+          borosMatchRatio: 1,
+          perpMatchRatio: 200_000 / 300_000,
+          borosVsPerpRatio: 0.5,
+          fullyHedged: false,
+        },
+      }),
+    );
+    expect(
+      screen.getByText(/open ~\$300,000 more SHORT on HYPERLIQUID and ~\$200,000 more LONG on OKX\./),
+    ).toBeInTheDocument();
+    // The leg-imbalance cue is per-leg too (the lagging SHORT, with its venue).
+    expect(screen.getByText(/open ~\$100,000 more SHORT on HYPERLIQUID\./)).toBeInTheDocument();
+  });
+
+  it('offers a pair CTA sized to the safe top-up when BOTH perp legs lag', () => {
+    const onOpen = vi.fn();
+    render(
+      card(
+        {
+          legs: [
+            makeStrategyLeg({ kind: 'perp', venue: 'HYPERLIQUID', side: 'SHORT', notionalUsd: 200_000 }),
+            makeStrategyLeg({ kind: 'perp', venue: 'OKX', side: 'LONG', notionalUsd: 300_000 }),
+            makeStrategyLeg({ kind: 'boros', venue: 'HYPERLIQUID', side: 'SHORT', notionalUsd: 500_000 }),
+            makeStrategyLeg({ kind: 'boros', venue: 'OKX', side: 'LONG', notionalUsd: 500_000 }),
+          ],
+          hedgeChecks: {
+            borosMatchRatio: 1,
+            perpMatchRatio: 200_000 / 300_000,
+            borosVsPerpRatio: 0.5,
+            fullyHedged: false,
+          },
+        },
+        { onOpenPerpLegs: onOpen },
+      ),
+    );
+    const cta = screen.getByRole('button', { name: /Execute a pair to complete the hedge/ });
+    fireEvent.click(cta);
+    // min(HL 300k, OKX 200k) — the largest pair that overshoots neither leg.
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen.mock.calls[0][1]).toBe(200_000);
+    expect(onOpen.mock.calls[0][0].base).toBe('HYPE');
+  });
+
+  it('no pair CTA when only one leg lags — a single order fixes that, not a pair', () => {
+    render(
+      card(
+        {
+          legs: [
+            makeStrategyLeg({ kind: 'perp', venue: 'HYPERLIQUID', side: 'SHORT', notionalUsd: 500_000 }),
+            makeStrategyLeg({ kind: 'perp', venue: 'OKX', side: 'LONG', notionalUsd: 200_000 }),
+            makeStrategyLeg({ kind: 'boros', venue: 'HYPERLIQUID', side: 'SHORT', notionalUsd: 500_000 }),
+            makeStrategyLeg({ kind: 'boros', venue: 'OKX', side: 'LONG', notionalUsd: 500_000 }),
+          ],
+          hedgeChecks: {
+            borosMatchRatio: 1,
+            perpMatchRatio: 0.4,
+            borosVsPerpRatio: 0.7,
+            fullyHedged: false,
+          },
+        },
+        { onOpenPerpLegs: vi.fn() },
+      ),
+    );
+    expect(screen.queryByRole('button', { name: /Execute a pair/ })).toBeNull();
+  });
+
+  it('no pair CTA when the book is fully hedged', () => {
+    render(card({}, { onOpenPerpLegs: vi.fn() }));
+    expect(screen.queryByRole('button', { name: /Execute a pair/ })).toBeNull();
   });
 
   it('cues connecting Gate when the perp side is invisible', () => {
