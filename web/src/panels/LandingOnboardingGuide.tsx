@@ -48,7 +48,10 @@ export function LandingOnboardingGuide() {
   }, [nonce]);
 
   return (
-    <aside className="sticky top-16 w-[360px] shrink-0 self-start" aria-label="Setup guide">
+    <aside
+      className="w-full shrink-0 lg:sticky lg:top-16 lg:w-[360px] lg:self-start"
+      aria-label="Setup guide"
+    >
       <div className="card px-5 py-5">
         <h2 className="text-xl font-bold tracking-tight text-ink-100">How to execute</h2>
         <p className="mt-1.5 text-xs leading-relaxed text-ink-300">

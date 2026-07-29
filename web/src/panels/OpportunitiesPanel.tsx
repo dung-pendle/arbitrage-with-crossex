@@ -289,7 +289,11 @@ function LegRow({
   note: ReactNode;
 }) {
   return (
-    <>
+    // `sm:contents` hands the four cells back to the parent grid on real
+    // screens. Below that the grid's three max-content tracks have a ~270px
+    // floor that no phone can pay — it pushed the page body sideways — so the
+    // row becomes a plain wrapping line instead.
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 sm:contents">
       <span className="num justify-self-start rounded-md border border-cyan-500/30 bg-cyan-500/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-cyan-300/85">
         {fmtNotionalShort(notionalUsd)}
       </span>
@@ -302,7 +306,7 @@ function LegRow({
         {venue}
       </span>
       <span className="text-[11.5px] text-ink-300">{note}</span>
-    </>
+    </div>
   );
 }
 
@@ -402,7 +406,9 @@ function OpportunityCard({
       className={`card p-4 ${detailsDisabled ? '' : 'cursor-pointer'}`}
       onClick={toggleFromCard}
     >
-      <div className="flex items-start justify-between gap-5">
+      {/* Stacked on phones: the shrink-0 button group is 184px, which left the
+          APR hero and the capital line ~112px to fight over and spilling. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex flex-wrap items-baseline gap-2">
             {capitalApr === null || !Number.isFinite(capitalApr) ? (
@@ -544,7 +550,7 @@ function OpportunityCard({
                   (perp legs)
                 </span>
               </div>
-              <div className="grid grid-cols-[max-content_max-content_max-content_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1.5">
+              <div className="flex flex-col gap-2 sm:grid sm:grid-cols-[max-content_max-content_max-content_minmax(0,1fr)] sm:items-center sm:gap-x-2.5 sm:gap-y-1.5">
                 <LegRow
                   notionalUsd={notionalUsd}
                   side="short"
@@ -581,7 +587,7 @@ function OpportunityCard({
                   (rate legs)
                 </span>
               </div>
-              <div className="grid grid-cols-[max-content_max-content_max-content_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1.5">
+              <div className="flex flex-col gap-2 sm:grid sm:grid-cols-[max-content_max-content_max-content_minmax(0,1fr)] sm:items-center sm:gap-x-2.5 sm:gap-y-1.5">
                 <LegRow
                   notionalUsd={notionalUsd}
                   side="short"

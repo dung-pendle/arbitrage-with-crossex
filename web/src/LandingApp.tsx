@@ -29,7 +29,11 @@ export function LandingApp() {
           </div>
         </header>
 
-        <main className="mx-auto flex w-full max-w-[1500px] flex-1 items-start gap-5 px-5 py-5">
+        {/* Stacked below lg: the rail is a fixed 360px that cannot shrink, so in
+            a row it left the content column max(0, VW-420) — literally 0px on
+            every phone, with the sticky rail painting over (and swallowing the
+            taps for) the Execute buttons underneath. Rates lead; guide follows. */}
+        <main className="mx-auto flex w-full max-w-[1500px] flex-1 flex-col gap-5 px-5 py-5 lg:flex-row lg:items-start">
           <section className="min-w-0 flex-1">
             <h2 className="mb-3 text-[34px] font-bold leading-tight tracking-tight text-ink-100">
               Live fixed rates, up for grabs

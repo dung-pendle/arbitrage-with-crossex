@@ -286,7 +286,10 @@ export function OpportunityWaterfall({
   return (
     <div>
       <div data-waterfall role="img" aria-label={`Waterfalls: ${label}`} className="relative pt-3">
-        <div className="flex items-stretch gap-6">
+        {/* Side by side the two plots split a phone's width into ~20px columns,
+            narrower than the value labels themselves, so adjacent labels
+            overlapped into a smear and spilled out of the card. */}
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-stretch">
           {showProfit && (
             <WaterfallPlot
               steps={profitSteps!}
