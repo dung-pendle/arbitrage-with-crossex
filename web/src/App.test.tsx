@@ -1,22 +1,22 @@
-/** Left-pane shell: one scrollable section column + sticky section nav.
- * Positions is always visible; Balances/Open Orders/Trades/Fees collapse,
- * stay mounted while hidden, and persist their state to localStorage. */
-import { act, screen, waitFor, within } from '@testing-library/react';
+/** Left-pane shell: one tab panel visible at a time, switched from the sticky
+ * header tab strip. Inactive panels stay MOUNTED but hidden so their queries
+ * keep polling; the active tab persists to localStorage. */
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import type { OpenOrder, TradesResponse, VenueFees } from './api/types';
-import { SECTIONS_STORAGE_KEY } from './components/CollapsibleSection';
+import type { OpenOrder, PositionsResponse, TradesResponse, VenueFees } from './api/types';
+import { ACTIVE_TAB_KEY } from './components/TabBar';
 import {
   baseHandlers,
+  ethPosition,
   makeOpportunitiesResult,
   makeOpportunityGroup,
   makeOpportunityLeg,
   makeOpportunityPair,
   opportunitiesHandler,
 } from './test/fixtures';
-import { MockIntersectionObserver } from './test/intersectionObserver';
 import { env, server } from './test/server';
 import { renderWithClient } from './test/utils';
 
@@ -55,142 +55,125 @@ function mockApp({ orders = [] as OpenOrder[] } = {}) {
   );
 }
 
-/** The section HEADER button for a title (the nav has same-named buttons). */
-function sectionButton(name: RegExp): HTMLElement {
-  const nav = screen.getByRole('navigation', { name: 'Sections' });
-  const btn = screen.getAllByRole('button', { name }).find((b) => !nav.contains(b));
-  expect(btn).toBeDefined();
-  return btn!;
+function tab(name: RegExp): HTMLElement {
+  return screen.getByRole('tab', { name });
+}
+
+function panel(id: string): HTMLElement {
+  return document.getElementById(`panel-${id}`)!;
 }
 
 async function renderApp() {
   const result = renderWithClient(<App />);
-  await screen.findByRole('navigation', { name: 'Sections' });
+  await screen.findByRole('tablist', { name: 'Sections' });
   return result;
 }
 
 afterEach(() => vi.restoreAllMocks());
 
-describe('App section shell', () => {
-  it('defaults: Balances expanded; Open Orders/Trades/Fees collapsed but mounted', async () => {
+describe('App tab shell', () => {
+  it('defaults to Opportunities; the other panels are mounted but hidden', async () => {
     mockApp();
     await renderApp();
 
-    // The 4-leg home base is the Positions section itself; with no tracked
-    // address (and no positions) it shows the address empty state and makes NO
-    // /api/strategy request.
-    expect(screen.getByText('Track your 4-leg strategy')).toBeInTheDocument();
+    expect(tab(/^Opportunities/)).toHaveAttribute('aria-selected', 'true');
+    expect(tab(/^Positions/)).toHaveAttribute('aria-selected', 'false');
 
-    expect(sectionButton(/^Balances/)).toHaveAttribute('aria-expanded', 'true');
-    expect(sectionButton(/^Open Orders/)).toHaveAttribute('aria-expanded', 'false');
-    expect(sectionButton(/^Trades/)).toHaveAttribute('aria-expanded', 'false');
-    expect(sectionButton(/^Fees/)).toHaveAttribute('aria-expanded', 'false');
-
-    // Collapsed content is mounted (data loads) yet hidden.
-    const feesHeading = await screen.findByText(/Your CrossEx fee rates/);
-    expect(feesHeading).not.toBeVisible();
-
-    // Positions is the non-collapsible home base — heading, no toggle button.
-    expect(screen.getByRole('heading', { name: 'Positions' })).toBeVisible();
+    // Inactive content is mounted (data loads, badges stay live) yet hidden.
+    expect(await screen.findByText(/Your CrossEx fee rates/)).not.toBeVisible();
+    // The 4-leg home base: with no tracked address it shows the address empty
+    // state and makes NO /api/strategy request.
+    expect(await screen.findByText('Track your 4-leg strategy')).not.toBeVisible();
   });
 
-  it('leads with Opportunities — first in the nav and expanded above Positions', async () => {
+  it('lands on Positions instead when the account already holds some', async () => {
+    mockApp();
+    // Overrides baseHandlers' empty positions.
+    server.use(
+      http.get('/api/positions', () =>
+        HttpResponse.json(env<PositionsResponse>({ positions: [ethPosition], exposure: [] })),
+      ),
+    );
+    await renderApp();
+
+    await waitFor(() => expect(tab(/^Positions/)).toHaveAttribute('aria-selected', 'true'));
+    expect(tab(/^Opportunities/)).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('an explicit tab choice outranks the holds-positions default', async () => {
+    localStorage.setItem(ACTIVE_TAB_KEY, JSON.stringify('fees'));
+    mockApp();
+    server.use(
+      http.get('/api/positions', () =>
+        HttpResponse.json(env<PositionsResponse>({ positions: [ethPosition], exposure: [] })),
+      ),
+    );
+    await renderApp();
+
+    expect(tab(/^Fees/)).toHaveAttribute('aria-selected', 'true');
+    expect(tab(/^Positions/)).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('keeps the tab strip inside the sticky header, so it never hides under it', async () => {
     mockApp();
     await renderApp();
-    const nav = screen.getByRole('navigation', { name: 'Sections' });
 
-    expect(within(nav).getAllByRole('button')[0]).toHaveAccessibleName(/^Opportunities/);
-    expect(sectionButton(/^Opportunities/)).toHaveAttribute('aria-expanded', 'true');
-    // The panel itself renders inside the section (its cards land once the
+    // The header wraps to two rows on narrow screens; a tab strip pinned at a
+    // fixed `top-16` below it would end up underneath.
+    expect(screen.getByRole('tablist', { name: 'Sections' }).closest('header')).not.toBeNull();
+  });
+
+  it('leads with Opportunities — first tab, and the one panel on screen', async () => {
+    mockApp();
+    await renderApp();
+
+    expect(screen.getAllByRole('tab')[0]).toHaveAccessibleName(/^Opportunities/);
+    // The panel itself renders inside the tab panel (its cards land once the
     // /api/opportunities fixture resolves).
-    const content = document.getElementById('opportunities-content')!;
     expect(
-      await within(content).findByRole('button', { name: 'Execute it' }),
+      await within(panel('opportunities')).findByRole('button', { name: 'Execute it' }),
     ).toBeInTheDocument();
+    expect(panel('opportunities')).toBeVisible();
   });
 
-  it('persists toggles across unmount + remount via localStorage', async () => {
+  it('persists the active tab across unmount + remount via localStorage', async () => {
     mockApp();
     const first = await renderApp();
 
-    // Collapse the default-open section and expand a default-collapsed one.
-    await userEvent.click(sectionButton(/^Balances/));
-    await userEvent.click(sectionButton(/^Trades/));
-    expect(sectionButton(/^Balances/)).toHaveAttribute('aria-expanded', 'false');
-    expect(sectionButton(/^Trades/)).toHaveAttribute('aria-expanded', 'true');
-    expect(JSON.parse(localStorage.getItem(SECTIONS_STORAGE_KEY)!)).toMatchObject({
-      balances: false,
-      trades: true,
-    });
+    await userEvent.click(tab(/^Trades/));
+    expect(tab(/^Trades/)).toHaveAttribute('aria-selected', 'true');
+    expect(localStorage.getItem(ACTIVE_TAB_KEY)).toBe('"trades"');
     first.unmount();
 
     await renderApp();
-    expect(sectionButton(/^Balances/)).toHaveAttribute('aria-expanded', 'false');
-    expect(sectionButton(/^Trades/)).toHaveAttribute('aria-expanded', 'true');
-    expect(sectionButton(/^Fees/)).toHaveAttribute('aria-expanded', 'false'); // untouched default
+    expect(tab(/^Trades/)).toHaveAttribute('aria-selected', 'true');
+    expect(tab(/^Opportunities/)).toHaveAttribute('aria-selected', 'false');
   });
 
-  it('nav click on a collapsed section expands it and smooth-scrolls to it', async () => {
+  it('clicking a tab swaps the visible panel and returns to the top', async () => {
     mockApp();
-    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const scrollSpy = vi.spyOn(window, 'scrollTo');
     await renderApp();
-    const nav = screen.getByRole('navigation', { name: 'Sections' });
 
-    expect(sectionButton(/^Fees/)).toHaveAttribute('aria-expanded', 'false');
-    await userEvent.click(within(nav).getByRole('button', { name: /^Fees/ }));
+    await userEvent.click(tab(/^Fees/));
 
-    expect(sectionButton(/^Fees/)).toHaveAttribute('aria-expanded', 'true');
-    expect(scrollSpy).toHaveBeenCalledTimes(1);
-    expect((scrollSpy.mock.contexts[0] as Element).id).toBe('fees');
-    expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    expect(panel('fees')).toBeVisible();
+    expect(panel('opportunities')).not.toBeVisible();
+    // A tall tab must not leave a short one scrolled past its content.
+    expect(scrollSpy).toHaveBeenCalledWith({ top: 0 });
   });
 
-  it('shows the live order count in nav AND header while Open Orders is collapsed', async () => {
-    localStorage.setItem(SECTIONS_STORAGE_KEY, JSON.stringify({ orders: false }));
+  it('shows the live order count on the tab while Open Orders is inactive', async () => {
     mockApp({ orders: [order('1'), order('2')] });
     await renderApp();
-    const nav = screen.getByRole('navigation', { name: 'Sections' });
 
-    const headerBtn = sectionButton(/^Open Orders/);
-    expect(headerBtn).toHaveAttribute('aria-expanded', 'false');
+    const ordersTab = tab(/^Open Orders/);
+    expect(ordersTab).toHaveAttribute('aria-selected', 'false');
 
-    // Badge lands in both places once the (still-mounted) query resolves.
-    await waitFor(() =>
-      expect(
-        within(within(nav).getByRole('button', { name: /Open Orders/ })).getByText('2'),
-      ).toBeInTheDocument(),
-    );
-    expect(within(headerBtn).getByText('2')).toBeInTheDocument();
-
+    // The badge lands once the (still-mounted) query resolves.
+    await waitFor(() => expect(within(ordersTab).getByText('2')).toBeInTheDocument());
     // The panel itself is mounted while hidden — its rows exist in the DOM.
-    const content = document.getElementById('orders-content')!;
-    expect(await within(content).findAllByText('Cancel')).toHaveLength(2);
-  });
-
-  it('highlights the topmost visible section via IntersectionObserver', async () => {
-    mockApp();
-    await renderApp();
-    const nav = screen.getByRole('navigation', { name: 'Sections' });
-
-    const io = MockIntersectionObserver.instances.at(-1)!;
-    expect(io.elements.size).toBe(6); // observing all six section anchors
-
-    act(() =>
-      io.trigger([
-        { target: document.getElementById('positions')!, isIntersecting: false },
-        { target: document.getElementById('trades')!, isIntersecting: true },
-        { target: document.getElementById('fees')!, isIntersecting: true },
-      ]),
-    );
-
-    // Trades and Fees intersect — the topmost (Trades) wins.
-    expect(within(nav).getByRole('button', { name: /^Trades/ })).toHaveAttribute(
-      'aria-current',
-      'true',
-    );
-    expect(within(nav).getByRole('button', { name: /^Positions/ })).not.toHaveAttribute(
-      'aria-current',
-    );
+    expect(await within(panel('orders')).findAllByText('Cancel')).toHaveLength(2);
   });
 
   it('falls back to the first-run view (not the trading panels) when /credentials errors', async () => {
@@ -210,12 +193,12 @@ describe('App section shell', () => {
     renderWithClient(<App />);
 
     expect(await screen.findByRole('complementary', { name: 'Setup guide' })).toBeInTheDocument();
-    // Neither the section nav nor the Positions home base is rendered.
-    expect(screen.queryByRole('navigation', { name: 'Sections' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Positions' })).not.toBeInTheDocument();
+    // Neither the tab strip nor the Positions home base is rendered.
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryByText('Track your 4-leg strategy')).not.toBeInTheDocument();
   });
 
-  it('replaces the trading shell (nav included) with opportunities + guide when unconfigured', async () => {
+  it('replaces the trading shell (tabs included) with opportunities + guide when unconfigured', async () => {
     server.use(
       http.get('/api/credentials', () =>
         HttpResponse.json(env({ configured: false, keyMasked: null })),
@@ -230,7 +213,7 @@ describe('App section shell', () => {
     expect(
       screen.getByRole('heading', { name: 'Live fixed rates, up for grabs' }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('navigation', { name: 'Sections' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
     // The order ticket only exists once credentials do.
     expect(screen.queryByRole('complementary', { name: 'Order ticket' })).not.toBeInTheDocument();
   });

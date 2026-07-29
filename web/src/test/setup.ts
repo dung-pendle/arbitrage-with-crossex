@@ -1,23 +1,21 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll } from 'vitest';
-import { installIntersectionObserverMock, MockIntersectionObserver } from './intersectionObserver';
 import { server } from './server';
 
-// jsdom has neither IntersectionObserver nor scrollIntoView — the section nav
-// needs both. The IO mock records instances so tests can drive it manually.
-installIntersectionObserverMock();
+// jsdom implements neither scrollIntoView nor scrollTo — the trade rail and the
+// tab switcher call them.
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
+window.scrollTo = () => {};
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 
 afterEach(() => {
   cleanup();
   server.resetHandlers();
-  localStorage.clear(); // basket drafts / recent symbols / section state must not leak across tests
-  MockIntersectionObserver.instances.length = 0;
+  localStorage.clear(); // basket drafts / recent symbols / active tab must not leak across tests
 });
 
 afterAll(() => server.close());

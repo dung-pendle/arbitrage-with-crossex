@@ -3,7 +3,7 @@
  * partial qty (validated against the live position), and a live preview of the
  * reduce-only IOC marketable-limit close. "Close now" is inline hold-to-confirm.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { ActionInput, CrossexPosition } from '../api/types';
 import { SegmentedToggle } from '../components/SegmentedToggle';
 import { SignedNumber } from '../components/SignedNumber';
@@ -16,17 +16,23 @@ import { usePreviewDebounced } from './usePreview';
 const CLOSE_INFO =
   'The close is sent as a reduce-only IOC limit at mark ± slippage — it can never increase the position and never rests on the book.';
 
+const WIDTH = 300;
+const MARGIN = 8;
+
 interface Props {
   position: CrossexPosition;
-  /** Button rect to anchor near (null → fallback placement, e.g. in tests). */
-  anchor: DOMRect | null;
+  /** Trigger button to anchor near (null → fallback placement, e.g. in tests).
+   * A live ref, not a rect: the popover re-anchors on scroll/resize. */
+  anchorRef: RefObject<HTMLElement> | null;
   onDismiss: () => void;
 }
 
-export function ClosePopover({ position, anchor, onDismiss }: Props) {
+export function ClosePopover({ position, anchorRef, onDismiss }: Props) {
   const [slipStr, setSlipStr] = useState('0.5');
   const [mode, setMode] = useState<'full' | 'partial'>('full');
   const [qtyStr, setQtyStr] = useState('');
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -67,16 +73,45 @@ export function ClosePopover({ position, anchor, onDismiss }: Props) {
       (Number(p.closing.positionQty) !== 0 ? Math.min(1, Number(p.qty) / Math.abs(Number(p.closing.positionQty))) : 1)
     : null;
 
-  const style = anchor
-    ? { top: anchor.bottom + 6, left: Math.max(8, anchor.right - 300) }
-    : { top: 96, right: 16 };
+  // Anchored below-right of the trigger, but CLAMPED into the viewport: a row
+  // near the bottom would otherwise push the dialog off-screen, where it can't
+  // be scrolled to (it is position: fixed). The dialog also GROWS after opening
+  // — partial-qty input, async preview, violation rows — so remeasure on resize
+  // too, and re-anchor on scroll since fixed coords are viewport-relative.
+  useLayoutEffect(() => {
+    if (!anchorRef) return; // no anchor (tests) → keep the static fallback
+    const reposition = () => {
+      const btn = anchorRef.current;
+      const dlg = dialogRef.current;
+      if (!btn || !dlg) return;
+      const r = btn.getBoundingClientRect();
+      const top = Math.max(MARGIN, Math.min(r.bottom + 6, window.innerHeight - dlg.offsetHeight - MARGIN));
+      const left = Math.max(MARGIN, Math.min(r.right - WIDTH, window.innerWidth - WIDTH - MARGIN));
+      setPos((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }));
+    };
+    reposition();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(reposition) : null;
+    if (ro && dialogRef.current) ro.observe(dialogRef.current);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+      ro?.disconnect();
+    };
+  }, [anchorRef]);
+
+  const style = pos ?? { top: 96, right: 16 };
 
   return (
     <div className="fixed inset-0 z-50" role="presentation" onClick={onDismiss}>
       <div
+        ref={dialogRef}
         role="dialog"
         aria-label={`Close ${position.symbol}`}
-        className="fixed w-[300px] rounded-xl border border-ink-600 bg-ink-900 p-3 shadow-2xl"
+        // max-h + scroll is the last resort for viewports shorter than the
+        // dialog; the hold-to-confirm error card is portaled, so it escapes it.
+        className="fixed max-h-[calc(100vh-16px)] w-[300px] overflow-y-auto rounded-xl border border-ink-600 bg-ink-900 p-3 shadow-2xl"
         style={style}
         onClick={(e) => e.stopPropagation()}
       >
@@ -168,6 +203,9 @@ export function ClosePopover({ position, anchor, onDismiss }: Props) {
             tone="red"
             label="Close now ▸"
             buttonClassName="mt-1 w-full"
+            // The preview box right above already reviews this close — the hover
+            // card would just repeat it on top of the popover. Errors still open it.
+            hoverCard={false}
             previewOpts={{ debounceMs: 300, refetchInterval: 3_000 }}
             onExecuted={onDismiss}
           />

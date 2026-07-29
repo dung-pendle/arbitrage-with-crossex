@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ActionInput, DealRequest, PreviewResponse } from '../api/types';
 import { baseHandlers, ethPosition, previewFor } from '../test/fixtures';
 import { env, server } from '../test/server';
@@ -38,10 +38,52 @@ function closePreviewHandler() {
   });
 }
 
+/** Anchor the popover off a real button whose rect we control. */
+function anchorAt(rect: Partial<DOMRect>) {
+  const btn = document.createElement('button');
+  document.body.appendChild(btn);
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(rect as DOMRect);
+  return { current: btn };
+}
+
 describe('ClosePopover', () => {
+  const viewportHeight = window.innerHeight;
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(window, 'innerHeight', { value: viewportHeight, configurable: true });
+  });
+
+  it('clamps into the viewport when the trigger sits near the bottom of the page', async () => {
+    server.use(...baseHandlers(), closePreviewHandler());
+    // A 400px dialog hung off a button whose bottom edge is 40px from the foot
+    // of a 600px viewport: the naive `anchor.bottom + 6` put it at 566, so all
+    // but 34px of it hung off-screen where it could never be scrolled to.
+    Object.defineProperty(window, 'innerHeight', { value: 600, configurable: true });
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(400);
+    const anchorRef = anchorAt({ top: 540, bottom: 560, left: 460, right: 500 });
+
+    renderWithClient(<ClosePopover position={ethPosition} anchorRef={anchorRef} onDismiss={() => {}} />);
+
+    const dialog = await screen.findByRole('dialog', { name: `Close ${ethPosition.symbol}` });
+    // innerHeight - height - margin = 600 - 400 - 8, and right-aligned to the button.
+    expect(dialog).toHaveStyle({ top: '192px', left: '200px' });
+  });
+
+  it('anchors just below the trigger when there is room', async () => {
+    server.use(...baseHandlers(), closePreviewHandler());
+    Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true });
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300);
+    const anchorRef = anchorAt({ top: 100, bottom: 120, left: 460, right: 500 });
+
+    renderWithClient(<ClosePopover position={ethPosition} anchorRef={anchorRef} onDismiss={() => {}} />);
+
+    const dialog = await screen.findByRole('dialog', { name: `Close ${ethPosition.symbol}` });
+    expect(dialog).toHaveStyle({ top: '126px' }); // anchor.bottom + 6, unclamped
+  });
+
   it('previews a full close (marketable limit px + uPnL) with the reduce-only note', async () => {
     server.use(...baseHandlers(), closePreviewHandler());
-    renderWithClient(<ClosePopover position={ethPosition} anchor={null} onDismiss={() => {}} />);
+    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
 
     expect(await screen.findByText(/marketable limit px/)).toBeInTheDocument();
     expect(screen.getByText('2497.45')).toBeInTheDocument();
@@ -51,7 +93,7 @@ describe('ClosePopover', () => {
 
   it('partial qty above the position shows an inline error and disables Close', async () => {
     server.use(...baseHandlers(), closePreviewHandler());
-    renderWithClient(<ClosePopover position={ethPosition} anchor={null} onDismiss={() => {}} />);
+    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
     await screen.findByText(/marketable limit px/);
 
     await userEvent.click(screen.getByRole('radio', { name: 'partial' }));
@@ -71,7 +113,7 @@ describe('ClosePopover', () => {
         return HttpResponse.json(env({ id: dealCalls[0].id }), { status: 202 });
       }),
     );
-    renderWithClient(<ClosePopover position={ethPosition} anchor={null} onDismiss={() => {}} />);
+    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
 
     const btn = await screen.findByRole('button', { name: 'Close now ▸' });
     await waitFor(() => expect(btn).toBeEnabled());
@@ -85,5 +127,39 @@ describe('ClosePopover', () => {
       clipBandPct: 0.5,
     });
     expect(dealCalls[0].b ?? null).toBeNull();
+  });
+
+  it('hovering "Close now" opens no review card — the preview box above already reviews it', async () => {
+    server.use(...baseHandlers(), closePreviewHandler());
+    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
+
+    const btn = await screen.findByRole('button', { name: 'Close now ▸' });
+    await waitFor(() => expect(btn).toBeEnabled());
+    await userEvent.hover(btn);
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  it('an execution error still surfaces even with the hover card suppressed', async () => {
+    server.use(
+      ...baseHandlers(),
+      closePreviewHandler(),
+      http.post('/api/deals', () =>
+        HttpResponse.json(
+          { ok: false, error: { category: 'exchange', message: 'venue rejected the close', retryable: true } },
+          { status: 500 },
+        ),
+      ),
+    );
+    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
+
+    const btn = await screen.findByRole('button', { name: 'Close now ▸' });
+    await waitFor(() => expect(btn).toBeEnabled());
+    fireEvent.pointerDown(btn);
+
+    // Errors must never be silent: they force the card open regardless.
+    expect(await screen.findByRole('alert', {}, { timeout: 3_000 })).toHaveTextContent(
+      /venue rejected the close/,
+    );
   });
 });

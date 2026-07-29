@@ -47,11 +47,7 @@ export function PositionRowActions({ position }: { position: CrossexPosition }) 
         Lev
       </button>
       {open === 'close' && (
-        <ClosePopover
-          position={position}
-          anchor={closeBtnRef.current?.getBoundingClientRect() ?? null}
-          onDismiss={() => setOpen(null)}
-        />
+        <ClosePopover position={position} anchorRef={closeBtnRef} onDismiss={() => setOpen(null)} />
       )}
     </span>
   );

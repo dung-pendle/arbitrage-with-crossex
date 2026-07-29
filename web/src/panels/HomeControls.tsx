@@ -53,11 +53,15 @@ export function AddressForm({
   submitLabel,
   onTrack,
   onCancel,
+  full = false,
 }: {
   initial?: string;
   submitLabel: string;
   onTrack: (address: string) => void;
   onCancel?: () => void;
+  /** Fill the container instead of centring at a fixed width — for the narrow
+   * settings drawer, where the fixed w-96 input would overflow. */
+  full?: boolean;
 }) {
   const id = useId();
   const [value, setValue] = useState(initial ?? '');
@@ -72,8 +76,8 @@ export function AddressForm({
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col items-center gap-2">
-      <div className="flex items-center gap-2">
+    <form onSubmit={submit} className={`flex flex-col gap-2 ${full ? 'items-stretch' : 'items-center'}`}>
+      <div className={`flex items-center gap-2 ${full ? 'w-full' : ''}`}>
         <label htmlFor={id} className="sr-only">
           EVM address
         </label>
@@ -85,7 +89,9 @@ export function AddressForm({
           placeholder="0x…"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          className={`input num w-96 max-w-full font-mono ${touched && !valid ? 'border-rose-500/60' : ''}`}
+          className={`input num font-mono ${full ? 'min-w-0 flex-1' : 'w-96 max-w-full'} ${
+            touched && !valid ? 'border-rose-500/60' : ''
+          }`}
         />
         <button type="submit" className="btn-primary" disabled={touched && !valid}>
           {submitLabel}

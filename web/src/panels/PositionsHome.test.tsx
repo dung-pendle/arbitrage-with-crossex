@@ -5,7 +5,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { PositionsResponse, StrategyReturns } from '../api/types';
 import {
   makeExposureGroup,
@@ -16,6 +16,8 @@ import { env, server } from '../test/server';
 import { renderWithClient } from '../test/utils';
 import { STRATEGY_STORAGE_KEY } from './HomeControls';
 import { PositionsHome } from './PositionsHome';
+import { SettingsDrawer } from './SettingsDrawer';
+import { TrackedAddressProvider } from './trackedAddress';
 
 const ADDR = '0xB2684Cd15b0CF17050531C51d581A9dDc365f1ef';
 
@@ -74,17 +76,24 @@ describe('PositionsHome — address tracking (ported from StrategyPanel)', () =>
     expect(await screen.findByText('hedged ✓')).toBeInTheDocument();
   });
 
-  it('the address chip swaps back to the form (prefilled) and Cancel restores the boxes', async () => {
+  it('the address chip opens Settings — there is no inline editor any more', async () => {
     localStorage.setItem(STRATEGY_STORAGE_KEY, JSON.stringify({ address: ADDR }));
     mockPositions();
     mockStrategy(makeStrategyReturns());
-    renderWithClient(<PositionsHome />);
+    const onOpenSettings = vi.fn();
+    renderWithClient(
+      <TrackedAddressProvider onOpenSettings={onOpenSettings}>
+        <PositionsHome />
+      </TrackedAddressProvider>,
+    );
     await screen.findByText('hedged ✓');
 
     await userEvent.click(screen.getByRole('button', { name: /0xB268…f1ef/ }));
-    expect(screen.getByLabelText('EVM address')).toHaveValue(ADDR);
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(await screen.findByText('hedged ✓')).toBeInTheDocument();
+
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    // The chip no longer swaps the boxes out for a form.
+    expect(screen.queryByLabelText('EVM address')).not.toBeInTheDocument();
+    expect(screen.getByText('hedged ✓')).toBeInTheDocument();
   });
 
   it('never shows the previous address’s data after switching to a new address', async () => {
@@ -92,6 +101,9 @@ describe('PositionsHome — address tracking (ported from StrategyPanel)', () =>
     const OTHER = '0x' + 'cd'.repeat(20);
     mockPositions();
     server.use(
+      http.get('/api/credentials', () =>
+        HttpResponse.json(env({ configured: true, keyMasked: 'gk_****abcd' })),
+      ),
       http.get('/api/strategy/:address', async ({ params }) => {
         if (String(params.address) === ADDR)
           return HttpResponse.json(env(makeStrategyReturns()));
@@ -99,14 +111,20 @@ describe('PositionsHome — address tracking (ported from StrategyPanel)', () =>
         return HttpResponse.json(env(makeStrategyReturns({ strategies: [] })));
       }),
     );
-    renderWithClient(<PositionsHome />);
+    // Switching the address is a Settings action now — drive the real surface,
+    // sharing one tracked-address store with the boxes.
+    renderWithClient(
+      <>
+        <SettingsDrawer open onClose={() => {}} />
+        <PositionsHome />
+      </>,
+    );
     expect(await screen.findByText('hedged ✓')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: /0xB268…f1ef/ }));
     const input = screen.getByLabelText('EVM address');
     await userEvent.clear(input);
     await userEvent.type(input, OTHER);
-    await userEvent.click(screen.getByRole('button', { name: 'Track' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Update' }));
 
     // While the new address loads, the OLD box must NOT be attributed to it.
     expect(screen.queryByText('hedged ✓')).not.toBeInTheDocument();

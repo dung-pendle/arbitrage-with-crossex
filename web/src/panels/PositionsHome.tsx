@@ -7,7 +7,7 @@
  * Owns the persisted {address, since, exit flags} state and both queries;
  * the boxes themselves are prop-driven.
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { qk, usePositions, useStrategy } from '../api/queries';
 import type { CrossexPosition, StrategyRollup } from '../api/types';
@@ -15,45 +15,23 @@ import { EmptyState } from '../components/EmptyState';
 import { Notes } from '../components/Notes';
 import { QueryError } from '../components/QueryError';
 import { TableSkeleton } from '../components/Skeleton';
-import { writeJson } from '../lib/storage';
 import { useTradeFlowOptional } from '../trade/TradeFlow';
-import {
-  AddressForm,
-  loadStored,
-  short,
-  STRATEGY_STORAGE_KEY,
-  StrategyFreshness,
-  TotalsStrip,
-  type Stored,
-} from './HomeControls';
+import { AddressForm, short, StrategyFreshness, TotalsStrip } from './HomeControls';
 import { buildBoxes } from './homeBoxes';
+import { useTrackedAddress } from './trackedAddress';
 import { PerpOnlyBox, type PerpOnlyCue } from './PerpOnlyBox';
 import { StrategyCard } from './StrategyCard';
 
 export function PositionsHome() {
-  const [stored] = useState<Stored>(loadStored);
-  const [address, setAddress] = useState<string | null>(stored.address);
-  const [since, setSince] = useState<number | null>(stored.since);
-  const [editing, setEditing] = useState(false);
+  const { address, since, setAddress, setSince, openSettings } = useTrackedAddress();
   const qc = useQueryClient();
   const flow = useTradeFlowOptional();
 
   const positionsQuery = usePositions();
   const strategyQuery = useStrategy(address, since);
 
-  const persist = (next: Partial<Stored>) => {
-    const merged: Stored = { address, since, ...next };
-    writeJson(STRATEGY_STORAGE_KEY, merged);
-  };
-  const track = (next: string) => {
-    persist({ address: next });
-    setAddress(next);
-    setEditing(false);
-  };
-  const changeSince = (next: number | null) => {
-    persist({ since: next });
-    setSince(next);
-  };
+  const track = (next: string) => setAddress(next);
+  const changeSince = (next: number | null) => setSince(next);
 
   const strategyData = strategyQuery.data;
   const positionsData = positionsQuery.data;
@@ -99,14 +77,14 @@ export function PositionsHome() {
       <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-400">
         4-leg fixed-return positions
       </h2>
-      {address && !editing && (
+      {address && (
         <span className="flex flex-wrap items-center gap-2 text-xs">
-          {/* The address chip is the change affordance. */}
+          {/* The address is edited in Settings now — the chip just jumps there. */}
           <button
             type="button"
             className="num text-ink-300 transition-colors hover:text-ink-100"
-            title={`${address} — click to change the tracked address`}
-            onClick={() => setEditing(true)}
+            title={`${address} — change the tracked address in Settings`}
+            onClick={openSettings}
           >
             {short(address)} ✎
           </button>
@@ -121,28 +99,6 @@ export function PositionsHome() {
       )}
     </div>
   );
-
-  // Address entry / edit mode.
-  if (editing) {
-    return (
-      <div>
-        {header}
-        <EmptyState
-          icon="◈"
-          title="Track your 4-leg strategy"
-          hint="Enter the EVM address holding your Boros legs — the terminal matches them with your Gate perp legs and shows your locked and realized return, net of all costs."
-          action={
-            <AddressForm
-              initial={address ?? ''}
-              submitLabel="Track"
-              onTrack={track}
-              onCancel={address ? () => setEditing(false) : undefined}
-            />
-          }
-        />
-      </div>
-    );
-  }
 
   // Nothing to draw boxes from yet. Also: with zero boxes we must not render
   // the definitive "No positions" claim while the strategy feed is still

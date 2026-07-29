@@ -533,15 +533,18 @@ function OpportunityCard({
           onClick={(e) => e.stopPropagation()}
         >
           <div className={microLabelClass}>How it works — you open 4 legs</div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="flex flex-col gap-2 rounded-lg border border-ink-700 bg-ink-950 p-3">
+          {/* Two columns only from xl: the content column is the viewport less
+              ~400px of chrome (page padding + the 340px trade rail), so at md
+              each leg box would be ~175px and the rows below would overflow. */}
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-ink-700 bg-ink-950 p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-300">
                 On CrossEx{' '}
                 <span className="font-normal normal-case tracking-normal text-ink-400">
                   (perp legs)
                 </span>
               </div>
-              <div className="grid grid-cols-[max-content_max-content_max-content_1fr] items-center gap-x-2.5 gap-y-1.5">
+              <div className="grid grid-cols-[max-content_max-content_max-content_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1.5">
                 <LegRow
                   notionalUsd={notionalUsd}
                   side="short"
@@ -571,14 +574,14 @@ function OpportunityCard({
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 rounded-lg border border-ink-700 bg-ink-950 p-3">
+            <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-ink-700 bg-ink-950 p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-300">
                 On Boros{' '}
                 <span className="font-normal normal-case tracking-normal text-ink-400">
                   (rate legs)
                 </span>
               </div>
-              <div className="grid grid-cols-[max-content_max-content_max-content_1fr] items-center gap-x-2.5 gap-y-1.5">
+              <div className="grid grid-cols-[max-content_max-content_max-content_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1.5">
                 <LegRow
                   notionalUsd={notionalUsd}
                   side="short"

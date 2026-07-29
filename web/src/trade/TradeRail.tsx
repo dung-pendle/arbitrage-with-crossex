@@ -23,6 +23,8 @@ export function TradeRail() {
   }, [prefillNonce]);
 
   return (
+    // The 340px is mirrored by TabBar's right slot so the active tab's cyan
+    // shelf ends exactly where this rail begins — change both together.
     <aside ref={asideRef} className="flex w-[340px] shrink-0 flex-col gap-4" aria-label="Order ticket">
       <div className="card px-4 py-4">
         <div className="mb-3 flex items-center justify-between">
