@@ -49,7 +49,25 @@ function toInfo(rule: RuleSymbol): SymbolInfo {
   };
 }
 
-/** Cached full rule list mapped to SymbolInfo, filtered to live FUTURE perps. */
+/**
+ * USDC-margined twin contracts deliberately EXCLUDED from the terminal.
+ * BINANCE / OKX / BYBIT list a USDC-quoted twin beside their primary USDT
+ * contract — a separate book with its own independently-settled funding rate.
+ * The Boros markets this terminal hedges reference the USDT contracts, and in
+ * the tickets' venue pickers a twin reads as "the same venue, again" while
+ * quietly being a different market. Dropped at the source list, so the
+ * pickers, the venue chips, the multi-venue counts and the by-symbol detail
+ * all agree. Hyperliquid is untouched: USDC is its ONLY quote, not a twin
+ * (same for Deribit and Kraken's USD).
+ */
+const EXCLUDED_QUOTE_TWINS: Record<string, string> = {
+  BINANCE: 'USDC',
+  OKX: 'USDC',
+  BYBIT: 'USDC',
+};
+
+/** Cached full rule list mapped to SymbolInfo, filtered to live FUTURE perps
+ * (minus the excluded USDC twins). */
 async function livePerps(
   deps: AppDeps,
   fresh: boolean,
@@ -60,7 +78,11 @@ async function livePerps(
     async () => (await deps.getClients().crossEx.listCrossexRuleSymbols()).body,
     { fresh },
   );
-  return { list: value.filter((r) => r.businessType === 'FUTURE' && r.state === 'live').map(toInfo), stale };
+  const list = value
+    .filter((r) => r.businessType === 'FUTURE' && r.state === 'live')
+    .map(toInfo)
+    .filter((s) => EXCLUDED_QUOTE_TWINS[s.exchange] !== s.quote);
+  return { list, stale };
 }
 
 export function symbolsRoutes(deps: AppDeps) {

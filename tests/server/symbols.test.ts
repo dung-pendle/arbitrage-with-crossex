@@ -88,3 +88,86 @@ describe('GET /api/symbols', () => {
     expect(body.error.category).toBe('symbol-invalid');
   });
 });
+
+describe('excluded USDC twins', () => {
+  let app: FastifyInstance;
+  afterEach(async () => {
+    await app?.close();
+  });
+
+  const row = (symbol: string, over: Record<string, unknown> = {}) => ({
+    symbol,
+    exchange_type: symbol.split('_')[0],
+    business_type: 'FUTURE',
+    state: 'live',
+    min_size: '0.01',
+    min_notional: '5',
+    lot_size: '0.01',
+    tick_size: '0.01',
+    max_num_orders: '100',
+    max_market_size: '10000',
+    max_limit_size: '100000',
+    contract_size: '1',
+    liquidation_fee: '0.001',
+    delist_time: '0',
+    ...over,
+  });
+
+  // BINANCE/OKX/BYBIT list a USDC-quoted twin of their primary USDT contract —
+  // a different book with independently-settled funding, unhedgeable through
+  // the Boros markets this terminal tracks. They must not appear in the venue
+  // pickers as "the same venue, again". Hyperliquid's USDC is its ONLY quote,
+  // not a twin — it stays.
+  it('drops BINANCE/OKX/BYBIT USDC twins from the listing but keeps Hyperliquid', async () => {
+    app = makeTestApp();
+    mockGateGet('/rule/symbols', {
+      body: [
+        row('BINANCE_FUTURE_BTC_USDT'),
+        row('BINANCE_FUTURE_BTC_USDC'),
+        row('OKX_FUTURE_BTC_USDC'),
+        row('BYBIT_FUTURE_BTC_USDC'),
+        row('HYPERLIQUID_FUTURE_BTC_USDC'),
+      ],
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/symbols', headers: HOST });
+    const rows: SymbolRow[] = res.json().data;
+    expect(rows.map((r) => r.symbol).sort()).toEqual([
+      'BINANCE_FUTURE_BTC_USDT',
+      'HYPERLIQUID_FUTURE_BTC_USDC',
+    ]);
+  });
+
+  it('a twin base does not count toward multiOnly venue counts', async () => {
+    app = makeTestApp();
+    // SOL exists on BINANCE only via the USDC twin: after exclusion it is a
+    // single-venue base and must vanish under ?multiOnly=1.
+    mockGateGet('/rule/symbols', {
+      body: [
+        row('GATE_FUTURE_SOL_USDT'),
+        row('BINANCE_FUTURE_SOL_USDC'),
+        row('GATE_FUTURE_ETH_USDT'),
+        row('BINANCE_FUTURE_ETH_USDT'),
+      ],
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/symbols?multiOnly=1', headers: HOST });
+    const rows: SymbolRow[] = res.json().data;
+    expect(rows.every((r) => r.base === 'ETH')).toBe(true);
+  });
+
+  it('the by-symbol detail agrees: an excluded twin is not found', async () => {
+    app = makeTestApp();
+    mockGateGet('/rule/symbols', {
+      body: [row('BINANCE_FUTURE_BTC_USDT'), row('BINANCE_FUTURE_BTC_USDC')],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/symbols/BINANCE_FUTURE_BTC_USDC',
+      headers: HOST,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.category).toBe('symbol-invalid');
+  });
+});
