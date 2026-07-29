@@ -158,11 +158,11 @@ export function StrategyCard({
   // Sizing gate: while the 4-leg book is still being BUILT — a Boros leg
   // unmatched, the perp pair lopsided, or the two layers sized apart — the
   // headline numbers would be confidently wrong (a full-life spread projection
-  // on half the notional reads as a great trade). Hide APR / Capital / PNL by
-  // maturity and show how to COMPLETE the hedge instead. Current PnL stays:
-  // real cash + MtM, whatever the book's shape. Thresholds mirror
-  // src/core/boros/returns.ts (the server computes the verdict; these only
-  // pick which cue lines to show).
+  // on half the notional reads as a great trade). Hide the title spread, APR,
+  // Capital and PNL by maturity, and show how to COMPLETE the hedge instead.
+  // Current PnL stays: real cash + MtM, whatever the book's shape. Thresholds
+  // mirror src/core/boros/returns.ts (the server computes the verdict; these
+  // only pick which cue lines to show).
   const checks = s.hedgeChecks;
   const pct = (r: number) => `${Math.round(r * 100)}%`;
   const hedgeCues: string[] = [];
@@ -363,15 +363,23 @@ export function StrategyCard({
               </>
             )}
           </span>
+          {/* The locked spread only means anything across a MATCHED pair of
+              Boros legs: rate_A − rate_B on a common notional. On a half-built
+              book the same ratio is an outright fixed rate wearing a spread's
+              label — and on a SINGLE Boros leg it reads double that leg's rate
+              (returns.ts divides by gross/2, calibrated for two legs). Gate it
+              with the other headline numbers rather than print it. */}
           <span
-            className="num text-xs text-ink-300"
+            className={`num text-xs ${checks.fullyHedged ? 'text-ink-300' : 'text-ink-400'}`}
             title={
-              s.spreadReturnUsd !== null
-                ? `Assumes ${fmtPct(s.spread)} locked on ${fmtUsdCompact(borosNotionalPerSide)} since the strategy start → spread return ≈${fmtUsd(s.spreadReturnUsd, 0)} by maturity`
-                : 'Locked fixed spread across the Boros legs'
+              !checks.fullyHedged
+                ? 'Hidden until the position is fully hedged — a locked spread needs a matched pair of Boros legs; see the sizing note below'
+                : s.spreadReturnUsd !== null
+                  ? `Assumes ${fmtPct(s.spread)} locked on ${fmtUsdCompact(borosNotionalPerSide)} since the strategy start → spread return ≈${fmtUsd(s.spreadReturnUsd, 0)} by maturity`
+                  : 'Locked fixed spread across the Boros legs'
             }
           >
-            ({fmtPct(s.spread)} spread)
+            ({checks.fullyHedged ? fmtPct(s.spread) : '—'} spread)
           </span>
         </div>
         <HedgeChip s={s} />

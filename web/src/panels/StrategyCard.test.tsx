@@ -472,9 +472,29 @@ describe('StrategyCard — sizing gate', () => {
     expect(screen.getByText(/Connect the Gate account to verify the perp side/)).toBeInTheDocument();
   });
 
+  it('hides the title spread too — a half-built Boros book does not price one', () => {
+    // A lone Boros leg is the worst case: returns.ts divides by gross/2 for the
+    // canonical two-leg book, so one leg reports DOUBLE its own rate as the
+    // "spread". Never print that number.
+    render(
+      card({
+        spread: 0.1283,
+        legs: [makeStrategyLeg({ kind: 'boros', venue: 'BYBIT', side: 'SHORT', notionalUsd: 160_000 })],
+        hedgeChecks: { borosMatchRatio: 0, perpMatchRatio: 0, borosVsPerpRatio: 0, fullyHedged: false },
+      }),
+    );
+    expect(screen.queryByText(/12\.83%/)).toBeNull();
+    expect(screen.getByText('(— spread)')).toBeInTheDocument();
+    expect(screen.queryByTitle(/Assumes .* locked on/)).toBeNull();
+    expect(
+      screen.getByTitle(/Hidden until the position is fully hedged — a locked spread needs a matched pair/),
+    ).toBeInTheDocument();
+  });
+
   it('shows the numbers and no note when fully hedged (the fixture default)', () => {
     render(card());
     expect(screen.getByText('$41,320')).toBeInTheDocument();
+    expect(screen.getByText('(7.07% spread)')).toBeInTheDocument();
     expect(screen.queryByText(/Position not fully hedged/)).toBeNull();
   });
 });
