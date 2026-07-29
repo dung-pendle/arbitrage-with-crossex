@@ -531,6 +531,39 @@ describe('buildStrategies — perp funding re-based to the strategy clock', () =
     expect(s.warnings.join(' ')).toMatch(/pre-lock accrual/);
   });
 
+  it('trusts an empty ledger within 8h of the lock — a young strategy has no settlements yet', () => {
+    // Perp opened shortly before the Boros legs, strategy locked 4h ago: no
+    // funding boundary has passed since the lock (venues settle at up to 8h
+    // intervals), so zero ledger rows IS the truth. Funding since start is a
+    // genuine $0 — re-based silently, no confusing "returned no rows" notice.
+    const out = buildStrategies(
+      input({
+        nowSec: OPENED + 4 * 3600,
+        perpPositions: olderPerps(),
+        perpFunding: { coversFromSec: 0, byPosition: new Map() },
+      }),
+    );
+    const s = out.strategies[0];
+    const hl = s.legs.find((l) => l.kind === 'perp' && l.venue === 'HYPERLIQUID')!;
+    expect(hl.cashFlowUsd).toBe(0); // re-based: nothing settled since the lock
+    expect(hl.netUsd).toBe(-hl.feesUsd);
+    expect(s.warnings.join(' ')).not.toMatch(/returned no rows/);
+  });
+
+  it('past the 8h grace an empty ledger is suspicious again — counter kept, warning shown', () => {
+    const out = buildStrategies(
+      input({
+        nowSec: OPENED + 8 * 3600 + 60,
+        perpPositions: olderPerps(),
+        perpFunding: { coversFromSec: 0, byPosition: new Map() },
+      }),
+    );
+    const s = out.strategies[0];
+    const hl = s.legs.find((l) => l.kind === 'perp' && l.venue === 'HYPERLIQUID')!;
+    expect(hl.cashFlowUsd).toBeCloseTo(3120, 6); // counter kept, NOT zeroed
+    expect(s.warnings.join(' ')).toMatch(/returned no rows/);
+  });
+
   it('keeps the counter (with a warning) when the ledger covers the window but has no rows for the position', () => {
     // The regression: coversFromSec 0 means "uncapped fetch", which is ALSO what
     // an empty/unusable ledger response produces. Summing `?? []` here yielded 0

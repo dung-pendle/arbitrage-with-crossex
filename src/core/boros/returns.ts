@@ -463,6 +463,12 @@ const fixedSign = (leg: StrategyLeg): number => (leg.side === 'SHORT' ? 1 : -1);
  * matches computeExposure's delta-neutrality band. */
 const HEDGE_BAND = 0.02;
 
+/** Longest standard perp funding interval (Binance et al. settle every 8h).
+ * Within this window of the strategy start, a pre-existing position with an
+ * empty funding ledger is normal — the first settlement boundary since the
+ * lock may simply not have passed yet. Beyond it, absence is suspicious. */
+const FUNDING_LEDGER_GRACE_SEC = 8 * 3600;
+
 function assembleStrategy(
   base: string,
   maturity: number,
@@ -616,9 +622,21 @@ function assembleStrategy(
       b.leg.cashFlowUsd = sinceStart;
       b.leg.netUsd = sinceStart - b.leg.feesUsd;
     } else if (fundingLedger && fundingLedger.coversFromSec <= clockStart && !ledgerRows) {
-      warnings.push(
-        `The ${b.leg.venue} ${base} perp predates the strategy start and the CrossEx funding ledger returned no rows for it — its funding number is the venue's cumulative counter and includes pre-lock accrual.`,
-      );
+      if (nowSec - clockStart < FUNDING_LEDGER_GRACE_SEC) {
+        // A young strategy may simply not have crossed a funding-settlement
+        // boundary yet (venues settle at up to 8h intervals), so a
+        // shortly-pre-existing position with no ledger rows is the EXPECTED
+        // truth, not an unusable read: funding since the lock really is $0.
+        // Re-base to 0 with no warning — the cumulative counter would
+        // over-attribute pre-lock accrual, and a "returned no rows" notice
+        // here reads as an error where nothing is wrong.
+        b.leg.cashFlowUsd = 0;
+        b.leg.netUsd = -b.leg.feesUsd;
+      } else {
+        warnings.push(
+          `The ${b.leg.venue} ${base} perp predates the strategy start and the CrossEx funding ledger returned no rows for it — its funding number is the venue's cumulative counter and includes pre-lock accrual.`,
+        );
+      }
     } else {
       warnings.push(
         `The ${b.leg.venue} ${base} perp predates the strategy start — its funding number includes pre-lock accrual (the CrossEx funding ledger doesn't cover that window).`,
