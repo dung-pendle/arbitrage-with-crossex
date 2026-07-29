@@ -79,7 +79,7 @@ function LegRow({ label, tone, p }: { label: string; tone: 'green' | 'red'; p: P
             {parseSymbol(p.symbol).exchange}
           </Chip>
           {isMaker && (
-            <Chip sm tone="cyan" title="Rests post-only at the touch; the other leg auto-hedges as it fills">
+            <Chip sm tone="cyan" title="Rests post-only one bid–ask gap behind the same-side touch; the other leg auto-hedges as it fills">
               maker
             </Chip>
           )}

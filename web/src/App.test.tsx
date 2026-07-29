@@ -273,3 +273,16 @@ describe('App tab shell', () => {
     expect(document.querySelector('.flash-ring')).not.toBeNull();
   });
 });
+
+describe('user guide link', () => {
+  it('sits in the header and points at USER_GUIDE.md on GitHub', async () => {
+    mockApp();
+    await renderApp();
+    const link = screen.getByRole('link', { name: 'User guide' });
+    expect(link).toHaveAttribute(
+      'href',
+      'https://github.com/mrenoon/boros-crossex-terminal/blob/main/USER_GUIDE.md',
+    );
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+});

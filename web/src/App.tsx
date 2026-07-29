@@ -62,6 +62,15 @@ export default function App() {
   // brand row in the states that have no tabs (loading, first-run).
   const headerControls = (
     <>
+      <a
+        href="https://github.com/mrenoon/boros-crossex-terminal/blob/main/USER_GUIDE.md"
+        target="_blank"
+        rel="noreferrer"
+        title="How to read the Opportunities scan and open a pair well (opens on GitHub)"
+        className="self-center whitespace-nowrap text-xs text-ink-400 underline decoration-ink-600 underline-offset-2 transition-colors hover:text-ink-100"
+      >
+        User guide
+      </a>
       <FreshnessIndicator />
       <button
         type="button"
