@@ -13,6 +13,7 @@ import type { Clock, VenuePort } from '../engine/types';
 import { buildApp } from './app';
 import { TtlCache } from './cache';
 import { restrictToOwner } from './secretFile';
+import { readLocalVersion } from './version';
 
 const publicMode = process.env.PUBLIC_MODE === '1';
 const port = Number(process.env.PORT ?? 6688);
@@ -99,6 +100,11 @@ const appDeps = {
   cache: new TtlCache(),
   publicMode,
   engine,
+  // The public landing never checks for updates (route not even registered);
+  // UPDATE_CHECK=0 lets an install opt out of the GitHub read entirely.
+  updateCheck: publicMode
+    ? undefined
+    : { current: readLocalVersion(repoRoot), disabled: process.env.UPDATE_CHECK === '0' },
   credentials: publicMode
     ? undefined
     : {

@@ -5,6 +5,7 @@ import { BrandMark } from './components/BrandMark';
 import { Chip } from './components/Chip';
 import { DisclaimerGate } from './components/DisclaimerGate';
 import { FreshnessIndicator } from './components/FreshnessIndicator';
+import { UpdateIndicator } from './components/UpdateIndicator';
 import { TableSkeleton } from './components/Skeleton';
 import { ACTIVE_TAB_KEY, isTabId, TabBar, TabPanel, type TabId } from './components/TabBar';
 import { readJson, writeJson } from './lib/storage';
@@ -69,6 +70,7 @@ export default function App() {
   // brand row in the states that have no tabs (loading, first-run).
   const headerControls = (
     <>
+      <UpdateIndicator />
       <button
         type="button"
         title="How to read the Opportunities scan and open a pair well"

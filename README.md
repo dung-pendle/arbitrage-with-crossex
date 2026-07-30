@@ -21,7 +21,8 @@ HYPERLIQUID). Go long a perp on one venue and short the same perp on another; th
 are delta-neutral and you collect the funding spread.
 
 You run it on your own machine — **macOS or Windows**. Your exchange API keys stay on
-that machine, and the app talks only to Gate.io's official API.
+that machine and are only ever sent, signed, to Gate.io's official API; the app itself
+talks to a short, fixed list of hosts (see *Your data & security* below).
 
 ---
 
@@ -113,7 +114,8 @@ for a Gate.io API key:
   the server is already running.
 - **Update** to the latest version by re-running the same install command for your
   platform. It stops the previous version first, so an old copy never lingers. Your keys
-  and trade history are never touched by updates.
+  and trade history are never touched by updates. When a new version is published, the
+  terminal shows an amber **Update** pill in the header with these exact instructions.
 
 ### Uninstall
 
@@ -154,8 +156,14 @@ trade journal out from under a live process that is still placing orders.
 - **The app is not reachable from the network.** The server binds to `127.0.0.1`
   (this-machine-only) and additionally rejects any request whose Host/Origin isn't
   localhost. Nobody on your Wi-Fi can see it.
-- **No telemetry.** The app makes requests to Gate.io only, and the installer downloads
-  only from `nodejs.org` and `github.com`.
+- **No telemetry, no analytics.** The app's only outbound requests are: `api.gateio.ws`
+  (signed, your account and orders); `api.boros.finance` (public market data, keyed only
+  by an EVM address you choose to enter); the venues' public order-book endpoints
+  (`fapi.binance.com`, `api.bybit.com`, `www.okx.com`, `futures.kraken.com`,
+  `api.hyperliquid.xyz`, `api.gateio.ws`) — public data, nothing about you; and
+  `raw.githubusercontent.com` — a 6-hourly read of this repo's one-line `version.json`
+  to show "update available". Nothing is ever sent, and `UPDATE_CHECK=0` disables it.
+  The installer downloads only from `nodejs.org` and `github.com`.
 - **It can't withdraw your funds** — and if you created the key as described above,
   Gate.io enforces that at the account level too.
 
@@ -186,6 +194,9 @@ Please read the installer, the uninstaller, and the application source code, the
 4. Where are my exchange API keys stored, and do they ever leave my machine other than
    in signed requests to Gate.io's official API (api.gateio.ws)?
 5. Is there any telemetry, analytics, or other "phoning home" in the app or installer?
+   The README claims the only outbound hosts are Gate.io, public Boros/venue market-data
+   APIs, and a version check against raw.githubusercontent.com — verify that list is
+   complete.
 6. Is the app's web server reachable from other devices on my network, or only from my
    own machine?
 7. Could this app withdraw funds from my exchange account? Which API permissions does it
@@ -247,7 +258,8 @@ GATE_API_SECRET=...
 Scripts run with `tsx` (no build step). If `node`/`yarn` aren't on your PATH, this repo was
 tested with nvm Node v22 — `nvm use 22` first.
 
-Deployment-relevant env vars (all optional): `PORT` (default 6688), `ARB_DATA_DIR`
+Deployment-relevant env vars (all optional): `UPDATE_CHECK` (set `0` to disable the
+GitHub version check), `PORT` (default 6688), `ARB_DATA_DIR`
 (trade-journal dir; default `<repo>/data`), `DOTENV_CONFIG_PATH` (where credentials are
 read from and saved to; default `<repo>/.env`). The macOS installer sets all three so
 user data lives outside the auto-updated app directory.

@@ -11,6 +11,7 @@ import {
   makeExposureGroup,
   makeStrategyReturns,
   makeStrategyRollup,
+  versionHandler,
 } from '../test/fixtures';
 import { env, server } from '../test/server';
 import { renderWithClient } from '../test/utils';
@@ -104,6 +105,7 @@ describe('PositionsHome — address tracking (ported from StrategyPanel)', () =>
       http.get('/api/credentials', () =>
         HttpResponse.json(env({ configured: true, keyMasked: 'gk_****abcd' })),
       ),
+      versionHandler(), // the drawer's About section reads /api/version
       http.get('/api/strategy/:address', async ({ params }) => {
         if (String(params.address) === ADDR)
           return HttpResponse.json(env(makeStrategyReturns()));

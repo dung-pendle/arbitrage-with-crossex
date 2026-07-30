@@ -28,11 +28,13 @@ import type {
   SymbolRule,
   TradesResponse,
   VenueFees,
+  UpdateStatus,
 } from './types';
 
 export const qk = {
   credentials: ['credentials'] as const,
   disclaimer: ['disclaimer'] as const,
+  version: ['version'] as const,
   account: ['account'] as const,
   positions: ['positions'] as const,
   openOrders: ['orders', 'open'] as const,
@@ -198,6 +200,21 @@ export function useDisclaimer() {
     queryKey: qk.disclaimer,
     queryFn: () => fetchJson<DisclaimerStatus>('/disclaimer'),
     staleTime: Infinity,
+    retryOnMount: false,
+  });
+}
+
+/** Server-side update check — the server caches the GitHub read for hours, so
+ * the client mirrors that cadence. Never retries: silent on failure by design
+ * (an errored query leaves data undefined, so the update pill simply doesn't
+ * render). */
+export function useVersion() {
+  return useQuery({
+    queryKey: qk.version,
+    queryFn: () => fetchJson<UpdateStatus>('/version'),
+    staleTime: 21_600_000,
+    refetchInterval: 21_600_000,
+    retry: false,
     retryOnMount: false,
   });
 }

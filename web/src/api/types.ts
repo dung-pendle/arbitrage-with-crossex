@@ -84,6 +84,18 @@ export interface DisclaimerStatus {
   acceptedVersion: string | null;
 }
 
+/** GET /api/version — the server-side GitHub update check (silent on failure:
+ * every error collapses to updateAvailable false). */
+export interface UpdateStatus {
+  /** The running copy's version (null = local version.json unreadable). */
+  current: string | null;
+  /** The latest published version (null = remote unreadable / check disabled). */
+  latest: string | null;
+  updateAvailable: boolean;
+  /** The latest version's feature list — only when updateAvailable. */
+  highlights: string[];
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/account
 // ---------------------------------------------------------------------------

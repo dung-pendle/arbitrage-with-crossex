@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "highlights": [
+    "Update notifications — the terminal now tells you when a new version is out",
+    "User guide, linked from the header",
+    "Per-leg hedge top-ups and a one-click pair to complete an unbalanced hedge",
+    "Sizing gate: headline APR/capital/PnL hide until the 4-leg book is really built",
+    "Boros order books cached on the 30s cadence — far fewer backend calls"
+  ]
+}

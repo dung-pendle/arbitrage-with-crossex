@@ -24,6 +24,7 @@ import { positionsRoutes } from './routes/positions';
 import { previewRoutes } from './routes/preview';
 import { strategyRoutes } from './routes/strategy';
 import { symbolsRoutes } from './routes/symbols';
+import { versionRoutes } from './routes/version';
 import { tradesRoutes } from './routes/trades';
 
 export interface AppDeps {
@@ -56,6 +57,12 @@ export interface AppDeps {
   };
   /** Test seam for the Boros backend client (defaults to global fetch). */
   borosFetch?: FetchLike;
+  /** Test seam for the GitHub update check (defaults to global fetch). */
+  versionFetch?: FetchLike;
+  /** Update check, set by the entry point (never in public mode): the running
+   * copy's version from <repoRoot>/version.json — null means "unknown", which
+   * disables the remote read entirely — plus the UPDATE_CHECK=0 opt-out. */
+  updateCheck?: { current: string | null; disabled?: boolean };
 }
 
 declare module 'fastify' {
@@ -164,6 +171,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         leverageRoutes,
         previewRoutes,
         dealsRoutes,
+        versionRoutes,
       ];
   for (const routes of routeModules) {
     app.register(routes(deps), { prefix: '/api' });

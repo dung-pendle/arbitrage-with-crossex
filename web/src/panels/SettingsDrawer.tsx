@@ -1,4 +1,4 @@
-import { useCredentials } from '../api/queries';
+import { useCredentials, useVersion } from '../api/queries';
 import { CredentialsForm } from '../components/CredentialsForm';
 import { Drawer } from '../components/Drawer';
 import { AddressForm } from './HomeControls';
@@ -9,6 +9,7 @@ import { useTrackedAddress } from './trackedAddress';
 export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data } = useCredentials();
   const { address, setAddress } = useTrackedAddress();
+  const version = useVersion(); // same query key as the header pill — deduped
 
   return (
     <Drawer open={open} title="Settings" onClose={onClose}>
@@ -57,6 +58,17 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
             Replace credentials
           </h3>
           <CredentialsForm submitLabel="Replace credentials" />
+        </section>
+        <section>
+          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+            About
+          </h3>
+          <div className="card num px-4 py-3 text-xs text-ink-200">
+            Version {version.data?.current ?? 'unknown'}
+            {version.data?.updateAvailable && version.data.latest
+              ? ` — v${version.data.latest} available`
+              : ''}
+          </div>
         </section>
       </div>
     </Drawer>

@@ -64,6 +64,8 @@ describe('public mode', () => {
       { method: 'POST', url: '/api/preview' },
       { method: 'POST', url: '/api/deals' },
       { method: 'GET', url: '/api/deals/some-id' },
+      // The update check reads GitHub — the public landing must never carry it.
+      { method: 'GET', url: '/api/version' },
     ];
     for (const { method, url } of requests) {
       const res = await app.inject({ method, url, headers: { host: 'example.com' } });

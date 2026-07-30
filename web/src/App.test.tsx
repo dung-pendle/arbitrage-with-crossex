@@ -17,6 +17,7 @@ import {
   makeOpportunityLeg,
   makeOpportunityPair,
   opportunitiesHandler,
+  versionHandler,
 } from './test/fixtures';
 import { env, server } from './test/server';
 import { renderWithClient } from './test/utils';
@@ -324,5 +325,24 @@ describe('user guide', () => {
       'href',
       'https://github.com/mrenoon/boros-crossex-terminal/blob/main/docs/USER_GUIDE.md',
     );
+  });
+});
+
+describe('update pill', () => {
+  it('renders left of the User guide control when a newer version is published', async () => {
+    mockApp();
+    server.use(versionHandler({ latest: '9.9.9', updateAvailable: true, highlights: ['x'] }));
+    await renderApp();
+
+    const pill = await screen.findByRole('button', { name: 'Update v9.9.9' });
+    const guide = screen.getByRole('button', { name: 'User guide' });
+    // The pill precedes the guide control in DOM order (i.e. sits to its left).
+    expect(pill.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows no pill while up to date (the baseHandlers default)', async () => {
+    mockApp();
+    await renderApp();
+    expect(screen.queryByRole('button', { name: /Update v/ })).toBeNull();
   });
 });

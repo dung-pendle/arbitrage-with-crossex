@@ -46,6 +46,10 @@ export const TTL = {
   book: 2_000,
   /** Fee rates, symbol rules, risk limits — effectively static. */
   static: 600_000,
+  /** GitHub version.json update check — hours, not minutes: releases are
+   * hand-bumped and rare, and a FAILED fetch is cached as null for the same
+   * window (one quiet retry per window, silent by design). */
+  version: 21_600_000,
 } as const;
 
 export class TtlCache {

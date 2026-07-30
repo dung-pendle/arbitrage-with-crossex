@@ -21,6 +21,7 @@ import type {
   StrategyReturns,
   StrategyRollup,
   SymbolRule,
+  UpdateStatus,
 } from '../api/types';
 import { env } from './server';
 
@@ -199,10 +200,27 @@ export function echoPreviewHandler(
   );
 }
 
+/** Up-to-date /api/version by default — no update pill. Override per-test with
+ * server.use(versionHandler({ latest: '9.9.9', updateAvailable: true, ... })). */
+export function versionHandler(over: Partial<UpdateStatus> = {}) {
+  return http.get('/api/version', () =>
+    HttpResponse.json(
+      env<UpdateStatus>({
+        current: '1.0.0',
+        latest: '1.0.0',
+        updateAvailable: false,
+        highlights: [],
+        ...over,
+      }),
+    ),
+  );
+}
+
 /** Standard monitoring handlers most trading tests need in the background. */
 export function baseHandlers() {
   return [
     http.get('/api/account', () => HttpResponse.json(env(account))),
+    versionHandler(),
     http.get('/api/positions', () =>
       HttpResponse.json(env<PositionsResponse>({ positions: [], exposure: [] })),
     ),
