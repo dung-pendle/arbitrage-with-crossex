@@ -69,7 +69,7 @@ const BOROS_ENTRY_OPTIONS: { value: BorosEntryMode; label: string }[] = [
 
 const ENTRY_MODE_LABEL: Record<EntryMode, string> = {
   'both-market': '2 market orders',
-  'maker-hedge': 'Maker + hedge',
+  'maker-hedge': 'Limit + hedge',
 };
 
 const EXIT_MODE_LABEL: Record<ExitMode, string> = {
@@ -81,7 +81,7 @@ const EXIT_MODE_LABEL: Record<ExitMode, string> = {
  * and the empty state read as sentences. */
 const ENTRY_MODE_PROSE: Record<EntryMode, string> = {
   'both-market': 'both legs market',
-  'maker-hedge': 'maker + hedge',
+  'maker-hedge': 'limit + hedge',
 };
 
 const EXIT_MODE_PROSE: Record<ExitMode, string> = {

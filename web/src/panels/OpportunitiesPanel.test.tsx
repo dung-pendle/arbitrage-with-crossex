@@ -661,7 +661,7 @@ describe('OpportunitiesPanel — the assumptions strip', () => {
     );
   });
 
-  it('labels the perp entry modes as "2 market orders" and "Maker + hedge"', async () => {
+  it('labels the perp entry modes as "2 market orders" and "Limit + hedge"', async () => {
     const urls: string[] = [];
     server.use(opportunitiesHandler(makeOpportunitiesResult(), { urls }));
     renderWithClient(<OpportunitiesPanel />);
@@ -676,8 +676,9 @@ describe('OpportunitiesPanel — the assumptions strip', () => {
       'aria-checked',
       'true',
     );
-    expect(within(entry).getByRole('radio', { name: 'Maker + hedge' })).toBeInTheDocument();
-    expect(within(entry).queryByRole('radio', { name: /Both market/ })).toBeNull();
+    expect(within(entry).getByRole('radio', { name: 'Limit + hedge' })).toBeInTheDocument();
+    // Both old labels named the mechanism; the new ones name the orders sent.
+    expect(within(entry).queryByRole('radio', { name: /Both market|Maker \+ hedge/ })).toBeNull();
   });
 
   it('reveals the custom size input and debounces it into the query', async () => {
@@ -725,7 +726,7 @@ describe('OpportunitiesPanel — the assumptions strip', () => {
     await openAssumptions();
     await userEvent.click(screen.getByRole('radio', { name: '$100k' }));
     await userEvent.click(screen.getByRole('radio', { name: 'At mark rate' }));
-    await userEvent.click(screen.getByRole('radio', { name: /Maker \+ hedge/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /Limit \+ hedge/ }));
     await userEvent.click(screen.getByRole('radio', { name: /Roll over/ }));
     first.unmount();
 
@@ -737,7 +738,7 @@ describe('OpportunitiesPanel — the assumptions strip', () => {
       'false',
     );
     await openAssumptions();
-    for (const name of ['$100k', 'At mark rate', /Maker \+ hedge/, /Roll over/] as const) {
+    for (const name of ['$100k', 'At mark rate', /Limit \+ hedge/, /Roll over/] as const) {
       expect(screen.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true');
     }
   });
@@ -772,7 +773,7 @@ describe('OpportunitiesPanel — the assumptions strip', () => {
       'aria-checked',
       'true',
     );
-    expect(screen.getByRole('radio', { name: /Maker \+ hedge/ })).toHaveAttribute(
+    expect(screen.getByRole('radio', { name: /Limit \+ hedge/ })).toHaveAttribute(
       'aria-checked',
       'true',
     );
@@ -925,7 +926,7 @@ describe('OpportunitiesPanel → PairTicket prefill', () => {
     // The panel's entry mode is what the ticket gets armed with.
     await openAssumptions();
     const panelModes = screen.getByRole('radiogroup', { name: 'Perp entry mode' });
-    await userEvent.click(within(panelModes).getByRole('radio', { name: /Maker \+ hedge/ }));
+    await userEvent.click(within(panelModes).getByRole('radio', { name: /Limit \+ hedge/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Execute it' }));
 
     await waitFor(() =>
