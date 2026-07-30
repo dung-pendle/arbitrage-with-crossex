@@ -8,14 +8,14 @@ In this guide, we will cover:
 
 ## 1. How the strategy works
 
-Perp traders pay (or earn) a floating funding rate. On [Boros](https://boros.pendle.finance), that funding rate is itself tradable — and the same coin's funding often carries **different implied fixed rates on different venues**: say ETH funding priced at 8% APR on Hyperliquid but 5% on Binance. The strategy locks in that gap.
+Perp traders pay (or earn) a floating funding rate. On [Boros](https://boros.pendle.finance), that funding rate is itself tradable - and the same coin's funding often carries **different implied fixed rates on different venues**: say ETH funding priced at 8% APR on Hyperliquid but 5% on Binance. The strategy locks in that gap.
 
 One position is 4 legs, all at the same notional:
 
 - **2 rate legs on Boros** - short the funding of the expensive market (you *receive* its fixed rate) and long the funding of the cheap one (you *pay* its fixed rate). Receive 8%, pay 5% → ~3% locked until the market's maturity.
 - **2 perp legs via CrossEx** - a short perp on the first venue, a long perp on the second, both opened through [Gate CrossEx](https://www.gate.com/crossex) under one **unified margin** account. Each perp leg's funding cancels the floating funding its Boros leg owes, and the two perps cancel each other's price exposure - with the shared margin, one leg's gain collateralises the other's loss.
 
-Once everything nets out there is no price exposure and no floating-rate exposure left — just the fixed spread, earned on the notional until maturity. The Opportunities scan prices that spread at your size, subtracts every cost it can model (Boros fees and price impact, perp fees and slippage, entry and exit), and shows what remains as a **net fixed APR on the capital** the four legs actually consume as margin.
+Once everything nets out there is no price exposure and no floating-rate exposure left - just the fixed spread, earned on the notional until maturity. The Opportunities scan prices that spread at your size, subtracts every cost it can model (Boros fees and price impact, perp fees and slippage, entry and exit), and shows what remains as a **net fixed APR on the capital** the four legs actually consume as margin.
 
 Boros Academy walks through this strategy in more depth: [Fixed-Return Funding Arbitrage](https://docs.pendle.finance/boros-academy/advanced-strategies/fixed-return-funding-arbitrage).
 
