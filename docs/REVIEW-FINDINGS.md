@@ -3,8 +3,12 @@
 An independent multi-agent review of this codebase (2026-07-29) — each finding adversarially
 verified by tracing its failure scenario end-to-end through the code — surfaced 27 defects.
 The 8 high-severity ones (1 critical, 7 major) were fixed before publication, each with a
-regression test pinning its failure scenario. The 19 minor findings below remain open and are
+regression test pinning its failure scenario. The minor findings below remain open and are
 tracked here for follow-up.
+
+A later external audit (2026-07-30) re-confirmed four of them plus one finding this file did
+not have — an unauthenticated local API. All five are now **fixed**, and are listed at the
+bottom rather than deleted, so the record of what was wrong survives.
 
 None of these is a money-loss path: they are edge-case hardening gaps, misleading operator
 messages, over-strict validations, and test-coverage holes. File pointers are given per item;
@@ -20,10 +24,6 @@ line numbers are omitted deliberately (they drift).
   read-failure streak/alert covers OPEN orders only. A PENDING order whose venue reads keep
   erroring (revoked key, 5xx storm) freezes its pair silently, with no operator signal — even
   though the order may be live and filling.
-- **Hand-cancel refusal can be bypassed** (`src/server/routes/orders.ts`): the guard matches only
-  `venue_order_id`, but the venue's cancel endpoint also accepts the client text id — and during
-  the create-unknown window the ledger's venue id is still NULL. Either path lands a CANCELLED
-  the engine reads as an explicit user STOP, permanently relinquishing the acquisition.
 - **Leg-A max-market-size check ignores `maxClip`** (`src/engine/create.ts`): the cap compares
   the FULL deal qty, but leg-A convert clips are split to at most `maxClip` — a deliberately
   clipped deal that could never send an over-cap order is rejected at creation. Fail-safe
@@ -44,21 +44,9 @@ line numbers are omitted deliberately (they drift).
 - **The finish reason always blames "below B's lot"** (`src/engine/decide.ts`): an unhedged
   terminal residual is attributed to the lot even when it is whole lots blocked by
   minSize/minNotional — misleading in the post-mortem report.
-- **Boot-time permission tightening targets `dirname(envPath)`** (`src/server/index.ts`): in a
-  source checkout the `.env`'s parent IS the repo root, so every dev boot chmods the checkout
-  0700 (POSIX) or strips its ACL inheritance (Windows), silently. Installed layouts (dedicated
-  config dir) are unaffected.
-- **The Windows ACL lockout probe tests the wrong thing** (`src/server/secretFile.ts`):
-  `fs.accessSync` on Windows checks only the read-only attribute, not the DACL — real lockouts
-  pass undetected, while a read-only backup file in the config dir makes the probe throw and
-  trigger a RECURSIVE `icacls /reset`, reverting the directory's protection on every boot.
 
 ## Installers
 
-- **The bash scripts kill by command-line match alone** (`install.sh`, `uninstall.sh`):
-  `pgrep -f <path>` matches any process merely holding the server path as an argument — an
-  editor or `tail -f` gets SIGTERM/SIGKILLed. The Windows scripts constrain the match to the
-  executables that can actually be the service; the bash scripts should do the same.
 - **`Protect-Directory`'s graceful fallback is unreachable** (`install.ps1`): under PS 5.1 with
   `$ErrorActionPreference='Stop'`, the `2>&1` on icacls turns stderr into a terminating error
   before the exit-code check that was meant to degrade gracefully.
@@ -90,3 +78,27 @@ line numbers are omitted deliberately (they drift).
 - **The Windows ACL branch has zero coverage** (`tests/unit/secret-file.test.ts`): the tests
   exercise only the POSIX chmod path; the icacls branch — the actual substance of the Windows
   hardening — is untested on every platform.
+
+---
+
+## Fixed since (2026-07-30 security pass)
+
+- **Hand-cancel could permanently abandon a live deal** — the guard matched only the venue
+  order id, so cancelling by the engine's client text (which the venue accepts, and which
+  rides in `/api/deals`) or during the window where our row's venue id is still NULL landed
+  a CANCELLED the engine read as a deliberate user STOP. The lookup now matches either
+  identifier, and while any live order awaits confirmation the route asks the venue whose
+  order an id is before letting a cancel through.
+- **The local API had no authentication** — any process, under any account on the machine,
+  could POST a deal. Every `/api` route except health now requires a per-install token
+  stored 0600 beside the `.env`; the server injects it into the page it serves, so the
+  bookmarked URL still just works.
+- **The Windows ACL probe was vacuous and destructive** — `fs.accessSync` never evaluates
+  the DACL, while any read-only file in the config dir triggered a recursive `icacls /reset`
+  that reverted the protection on every boot. It now probes by really opening files, skips
+  read-only-attributed entries, resets scoped to the target, and reports.
+- **A source checkout got chmod 0700'ed on every boot** — the `.env`'s parent is the repo
+  root in a checkout. The parent is now hardened only when an installer chose that directory.
+- **The bash installers killed by argv match alone** — an editor or `tail` holding the server
+  path was SIGKILLed, and a relative-args server was missed. They now confirm by the
+  process's executable and sweep the private runtime, mirroring the Windows scripts.

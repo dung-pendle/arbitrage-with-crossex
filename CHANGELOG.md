@@ -3,6 +3,27 @@
 Only substantial releases are listed here — each one bumps `version.json` (which is what the
 in-app update check compares against).
 
+## 1.1.0 — 2026-07-30
+
+Security pass, acting on an external audit (its findings, and what remains open, are in
+`docs/REVIEW-FINDINGS.md`).
+
+- **The local API requires a token.** Binding to loopback never stopped another local
+  process from trading; every `/api` route except the installer's health probe now needs a
+  per-install token stored 0600 beside your keys. Your browser gets it from the page, so the
+  bookmarked http://localhost:6688 is unchanged. Scripting the API needs the `x-arb-token`
+  header — see the README.
+- **Hand-cancelling can no longer abandon a live deal.** The refusal guard now covers the
+  client-text id the venue also accepts, and the window where an order is live on the venue
+  before our ledger knows its id. Either path previously read as a deliberate STOP and gave up
+  the rest of the entry permanently.
+- **Install exactly what you audited.** `BOROS_REF` pins any commit, tag or branch on both
+  platforms; the installers record the commit they laid down, and Settings → About shows it.
+- **Windows key-file permissions no longer undo themselves** on every boot, and running from
+  a source checkout no longer narrows the whole checkout to owner-only.
+- **The macOS install/uninstall scripts** no longer SIGKILL an editor that happens to have
+  the server path in its arguments — and no longer miss a server started with relative paths.
+
 ## 1.0.0 — 2026-07-30
 
 - Update notifications — the terminal now tells you when a new version is out, with per-OS
