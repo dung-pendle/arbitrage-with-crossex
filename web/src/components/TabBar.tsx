@@ -44,17 +44,17 @@ export function TabBar({
     // Mirrors <main>'s grid in App.tsx (max-w, px-5, gap-5, w-[340px] rail) so
     // the cyan shelf below lines up with the content column exactly.
     <div className="mx-auto flex max-w-[1500px] items-stretch gap-5 px-5">
-      {/* The folder's surface: a cyan shelf spanning the content column and
+      {/* The folder's surface: a cyan hairline spanning the content column and
           stopping at the order ticket, which every tab shows. -mb-px pulls it
           over the header's grey border-b, which a child's border paints above. */}
-      <div className="-mb-px min-w-0 flex-1 border-b-2 border-cyan-400/70">
-        {/* -mb-0.5 pulls the shelf up over the tabs' bottom 2px. Children paint
-            above their parent's border, so the active tab's opaque background
-            cuts the shelf while transparent inactive tabs let it show through. */}
+      <div className="-mb-px min-w-0 flex-1 border-b border-cyan-500/40">
+        {/* The second -mb-px pulls the tabs down over the hairline. Children
+            paint above their parent's border, so the active tab's opaque
+            background cuts the shelf; transparent tabs let it show through. */}
         <div
           role="tablist"
           aria-label="Sections"
-          className="-mb-0.5 flex items-stretch overflow-x-auto"
+          className="-mb-px flex items-stretch overflow-x-auto"
         >
           {tabs.map((t, i) => {
             const activeTab = t.id === active;
@@ -72,19 +72,21 @@ export function TabBar({
                   aria-controls={`panel-${t.id}`}
                   data-active={activeTab}
                   onClick={() => onSelect(t.id)}
-                  // Active = a folder tab: opaque, bordered on three sides, and
-                  // no bottom border, so it interrupts the shelf underneath and
-                  // reads as one surface with the content. Inactive keeps the
-                  // same box (transparent borders) so selecting shifts nothing.
-                  className={`flex shrink-0 items-end gap-1.5 whitespace-nowrap rounded-t-lg border-x border-t-2 pb-2 pt-2 transition-colors ${
-                    t.primary ? 'px-4 text-xl font-bold tracking-tight' : 'px-2.5 text-xs font-medium'
+                  // Active = a folder tab, machined flat: square corners,
+                  // opaque surface, hairline sides, a 2px cyan signal cap, and
+                  // no bottom border so it cuts the shelf and reads as one
+                  // surface with the content. Colour is a signal, not paint —
+                  // the label goes bright white; only the cap is cyan. Inactive
+                  // keeps the same box (transparent borders) so nothing shifts.
+                  className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-x border-t-2 uppercase transition-colors ${
+                    t.primary
+                      ? 'px-5 pb-2.5 pt-[9px] text-[15px] font-semibold tracking-wider'
+                      : 'px-3 pb-2.5 pt-[11px] text-[11px] font-medium tracking-wider'
                   } ${
                     activeTab
-                      ? `border-x-ink-700 border-t-cyan-400 bg-ink-900 ${
-                          t.primary ? 'text-cyan-300' : 'text-ink-100'
-                        }`
-                      : `border-transparent hover:bg-ink-900/40 ${
-                          t.primary ? 'text-ink-400 hover:text-cyan-200' : 'text-ink-500 hover:text-ink-300'
+                      ? 'border-x-ink-700 border-t-cyan-400 bg-ink-900 text-ink-100'
+                      : `border-transparent hover:border-t-ink-500 hover:bg-ink-900/40 ${
+                          t.primary ? 'text-ink-400 hover:text-ink-200' : 'text-ink-500 hover:text-ink-300'
                         }`
                   }`}
                 >
