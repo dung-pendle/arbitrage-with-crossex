@@ -25,9 +25,10 @@ export function LandingOnboardingGuide() {
   const [os, setOs] = useState<Os>(detectOs);
   const windows = os === 'windows';
 
-  // Every step starts closed: six steps of full content buries the live rates
-  // that are the actual pitch. Titles alone read as a short, scannable promise.
-  const [openSteps, setOpenSteps] = useState<ReadonlySet<number>>(() => new Set());
+  // Only step 1 starts open: the install command is what a first-time visitor
+  // needs in front of them, while six steps of full content would bury the live
+  // rates that are the actual pitch. The rest read as scannable titles.
+  const [openSteps, setOpenSteps] = useState<ReadonlySet<number>>(() => new Set([1]));
   const toggle = (n: number) =>
     setOpenSteps((prev) => {
       const next = new Set(prev);

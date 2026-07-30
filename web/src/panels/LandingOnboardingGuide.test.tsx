@@ -25,14 +25,18 @@ describe('LandingOnboardingGuide', () => {
     expect(within(steps[4]).getByRole('heading')).toHaveTextContent('Create your API key');
   });
 
-  it('starts with every step collapsed — titles only, no bodies', () => {
+  it('opens step 1 and collapses the rest — the install command is what a visitor needs', () => {
     renderWithClient(<LandingOnboardingGuide />);
 
-    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(6);
-    expect(screen.queryAllByRole('button', { expanded: true })).toHaveLength(0);
-    // Bodies are mounted but hidden, so nothing inside them is reachable.
+    expect(screen.getByRole('button', { name: /^Install the terminal/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(5);
+    // The other bodies are mounted but hidden, so nothing inside them is reachable.
     expect(screen.queryByRole('button', { name: 'Copy audit prompt' })).toBeNull();
     expect(screen.getByText(/Audit this open-source tool/)).not.toBeVisible();
+    expect(screen.getByText(/\/bin\/bash -c/)).toBeVisible();
   });
 
   it('expands a step on click and collapses it again', async () => {
@@ -60,9 +64,9 @@ describe('LandingOnboardingGuide', () => {
   });
 
   it('defaults to the macOS install command and swaps to PowerShell on demand', async () => {
-    // jsdom's userAgent is not Windows, so detectOs() lands on macOS.
+    // jsdom's userAgent is not Windows, so detectOs() lands on macOS. Step 1 is
+    // open by default, so the command is on screen already.
     renderWithClient(<LandingOnboardingGuide />);
-    await openStep(/^Install the terminal/);
 
     expect(screen.getByText(/\/bin\/bash -c/)).toBeInTheDocument();
     expect(screen.queryByText(/install\.ps1 \| iex/)).toBeNull();

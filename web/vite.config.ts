@@ -19,6 +19,14 @@ const LANDING_DESCRIPTION =
 // (`LANDING_URL=https://your-domain yarn build:landing`); no domain is baked in,
 // and the canonical/og:url tags are omitted when it is unset.
 const LANDING_URL = process.env.LANDING_URL ?? '';
+// GA4 measurement id for the PUBLIC site only, supplied at build time
+// (`GA_MEASUREMENT_ID=G-XXXXXXXXXX yarn build:landing`). Deliberately scoped to
+// the landing plugin: the terminal build runs on the visitor's own machine
+// beside their exchange keys and must never phone a third party. Shape-checked
+// because it is interpolated straight into a <script> tag.
+const GA_ID = /^G-[A-Z0-9]+$/i.test(process.env.GA_MEASUREMENT_ID ?? '')
+  ? (process.env.GA_MEASUREMENT_ID as string)
+  : '';
 
 function landingHtml(): PluginOption {
   return {
@@ -27,6 +35,17 @@ function landingHtml(): PluginOption {
       // 'pre' so the entry swap happens before Vite discovers the module graph.
       order: 'pre',
       handler(html: string) {
+        const analytics = GA_ID
+          ? [
+              `    <script async src="https://www.googletagmanager.com/gtag/js?id=${GA_ID}"></script>`,
+              `    <script>`,
+              `      window.dataLayer = window.dataLayer || [];`,
+              `      function gtag(){dataLayer.push(arguments);}`,
+              `      gtag('js', new Date());`,
+              `      gtag('config', '${GA_ID}');`,
+              `    </script>`,
+            ]
+          : [];
         const canonical = LANDING_URL
           ? [
               `    <link rel="canonical" href="${LANDING_URL}" />`,
@@ -45,6 +64,7 @@ function landingHtml(): PluginOption {
               `    <meta property="og:type" content="website" />`,
               ...canonical,
               `    <meta name="twitter:card" content="summary" />`,
+              ...analytics,
               '  </head>',
             ].join('\n'),
           );
