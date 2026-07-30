@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import type { OpenOrder, PositionsResponse, TradesResponse, VenueFees } from './api/types';
 import { ACTIVE_TAB_KEY } from './components/TabBar';
+import { USER_GUIDE_RAW_URL } from './components/UserGuideModal';
 import {
   baseHandlers,
   ethPosition,
@@ -274,15 +275,54 @@ describe('App tab shell', () => {
   });
 });
 
-describe('user guide link', () => {
-  it('sits in the header and points at USER_GUIDE.md on GitHub', async () => {
+describe('user guide', () => {
+  it('renders the guide in-app from GitHub instead of navigating away', async () => {
     mockApp();
+    server.use(
+      http.get(USER_GUIDE_RAW_URL, () =>
+        HttpResponse.text('# User guide\n\nRead the **Opportunities** scan first.'),
+      ),
+    );
     await renderApp();
-    const link = screen.getByRole('link', { name: 'User guide' });
-    expect(link).toHaveAttribute(
+
+    // A button, not a link — clicking it must not leave the terminal.
+    expect(screen.queryByRole('link', { name: 'User guide' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'User guide' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('heading', { name: 'User guide', level: 1 })).toBeVisible();
+    expect(within(dialog).getByText('Opportunities').tagName).toBe('STRONG');
+  });
+
+  it('is not fetched until the guide is actually opened', async () => {
+    const calls: string[] = [];
+    mockApp();
+    server.use(
+      http.get(USER_GUIDE_RAW_URL, () => {
+        calls.push('hit');
+        return HttpResponse.text('# User guide');
+      }),
+    );
+    await renderApp();
+
+    expect(calls).toHaveLength(0);
+    await userEvent.click(screen.getByRole('button', { name: 'User guide' }));
+    await screen.findByRole('dialog');
+    await waitFor(() => expect(calls).toHaveLength(1));
+  });
+
+  it('falls back to the GitHub link when the fetch fails', async () => {
+    mockApp();
+    server.use(http.get(USER_GUIDE_RAW_URL, () => new HttpResponse(null, { status: 500 })));
+    await renderApp();
+
+    await userEvent.click(screen.getByRole('button', { name: 'User guide' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Couldn’t load the guide/);
+    expect(within(alert).getByRole('link', { name: 'docs/USER_GUIDE.md' })).toHaveAttribute(
       'href',
       'https://github.com/mrenoon/boros-crossex-terminal/blob/main/docs/USER_GUIDE.md',
     );
-    expect(link).toHaveAttribute('target', '_blank');
   });
 });

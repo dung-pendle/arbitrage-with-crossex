@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useCredentials, useOpenOrders, usePositions } from './api/queries';
 import { AccountHealthStrip } from './components/AccountHealthStrip';
 import { BrandMark } from './components/BrandMark';
@@ -21,8 +21,15 @@ import { RecoveryBanner } from './trade/RecoveryBanner';
 import { TradeFlowProvider } from './trade/TradeFlow';
 import { TradeRail } from './trade/TradeRail';
 
+// The markdown renderer is ~160kB and only the guide needs it — split it out so
+// opening the terminal doesn't pay for a document most sessions never read.
+const UserGuideModal = lazy(() =>
+  import('./components/UserGuideModal').then((m) => ({ default: m.UserGuideModal })),
+);
+
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   // null = the user has never picked a tab, so the landing tab is still up for
   // grabs: it resolves to Positions once we know they hold some, else
   // Opportunities. An explicit pick (persisted) always wins.
@@ -62,15 +69,14 @@ export default function App() {
   // brand row in the states that have no tabs (loading, first-run).
   const headerControls = (
     <>
-      <a
-        href="https://github.com/mrenoon/boros-crossex-terminal/blob/main/docs/USER_GUIDE.md"
-        target="_blank"
-        rel="noreferrer"
-        title="How to read the Opportunities scan and open a pair well (opens on GitHub)"
+      <button
+        type="button"
+        title="How to read the Opportunities scan and open a pair well"
+        onClick={() => setGuideOpen(true)}
         className="self-center whitespace-nowrap text-xs text-ink-400 underline decoration-ink-600 underline-offset-2 transition-colors hover:text-ink-100"
       >
         User guide
-      </a>
+      </button>
       <FreshnessIndicator />
       <button
         type="button"
@@ -169,6 +175,12 @@ export default function App() {
           </main>
 
           <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+          {/* Mounted only while open, so the guide is fetched on first request. */}
+          {guideOpen && (
+            <Suspense fallback={null}>
+              <UserGuideModal onClose={() => setGuideOpen(false)} />
+            </Suspense>
+          )}
         </div>
       </TrackedAddressProvider>
     </TradeFlowProvider>
