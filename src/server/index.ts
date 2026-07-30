@@ -12,6 +12,8 @@ import { gateVenue } from '../engine/venueGate';
 import type { Clock, VenuePort } from '../engine/types';
 import { buildApp } from './app';
 import { TtlCache } from './cache';
+import { readOrCreateApiToken } from './authToken';
+import { tokenizedIndexHtml } from './spa';
 import { restrictToOwner } from './secretFile';
 import { readLocalVersion } from './version';
 
@@ -109,6 +111,9 @@ const appDeps = {
   getClients,
   cache: new TtlCache(),
   publicMode,
+  // Created on first boot beside the .env. Public mode has no credentialed
+  // route to protect and serves strangers by design, so it carries none.
+  authToken: publicMode ? undefined : readOrCreateApiToken(path.dirname(envPath)),
   engine,
   // The public landing never checks for updates (route not even registered);
   // UPDATE_CHECK=0 lets an install opt out of the GitHub read entirely.
@@ -130,6 +135,20 @@ const app = buildApp(appDeps);
 // Serve the built SPA when present (`yarn start`); in dev, Vite proxies /api here.
 const webDist = path.join(repoRoot, 'web', 'dist');
 if (fs.existsSync(path.join(webDist, 'index.html'))) {
+  // The HTML is served BY US so the token can be injected; the hashed assets
+  // still go through the static plugin. no-store (and no ETag) because a
+  // cached copy could otherwise revive a page carrying a stale token.
+  // @fastify/static registers only a wildcard, so these explicit routes win.
+  if (appDeps.authToken) {
+    const token = appDeps.authToken;
+    const serveIndex = async (_req: unknown, reply: { header: (k: string, v: string) => typeof reply; type: (t: string) => typeof reply; send: (b: string) => unknown }) =>
+      reply
+        .header('cache-control', 'no-store')
+        .type('text/html; charset=utf-8')
+        .send(tokenizedIndexHtml(webDist, token));
+    app.get('/', serveIndex);
+    app.get('/index.html', serveIndex);
+  }
   app.register(fastifyStatic, { root: webDist });
 }
 

@@ -76,9 +76,12 @@ export function mockGateCreateByText(
 }
 
 
-/** app.inject() defaults Host to localhost:80, which the origin guard rejects —
- * every test request must carry an allowed Host header. */
-export const HOST = { host: 'localhost:6688' };
+export const TEST_TOKEN = 'test-api-token';
+
+/** app.inject() defaults Host to localhost:80, which the origin guard rejects,
+ * and carries no API token, which the auth gate rejects — every test request
+ * needs both. */
+export const HOST = { host: 'localhost:6688', 'x-arb-token': TEST_TOKEN };
 
 export const TEST_KEY = 'testkey12345678';
 export const TEST_SECRET = 'testsecret';
@@ -91,6 +94,7 @@ export function makeTestApp(overrides?: Partial<AppDeps>): FastifyInstance {
   return buildApp({
     getClients,
     cache: new TtlCache(),
+    authToken: TEST_TOKEN,
     // In-memory engine store per app; the loop is never started here — deal tests
     // drive tickPair() themselves for deterministic engine behavior.
     engine: {

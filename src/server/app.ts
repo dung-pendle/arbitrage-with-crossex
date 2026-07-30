@@ -3,6 +3,7 @@
  * Owns the localhost-only origin guard, the {ok,data,meta}/{ok,error} envelope,
  * and the error-category → HTTP-status mapping; routes stay thin.
  */
+import { createHash, timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import type { FetchLike } from '../core/boros/client';
 import type { Clients } from '../core/clients';
@@ -58,6 +59,10 @@ export interface AppDeps {
     hardenConfigDir?: boolean;
     setClients(clients: Clients): void;
   };
+  /** The per-install API token every /api request must carry (except health).
+   * Required unless publicMode — buildApp refuses to serve the trading API
+   * unauthenticated rather than let a missing wire-up pass silently. */
+  authToken?: string;
   /** Test seam for the Boros backend client (defaults to global fetch). */
   borosFetch?: FetchLike;
   /** Test seam for the GitHub update check (defaults to global fetch). */
@@ -110,6 +115,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Public mode serves strangers by definition — the guard only protects a
   // credentialed localhost server from DNS-rebinding/CSRF, and no credentialed
   // route is registered in public mode.
+  // Fail closed on a missing wire-up: an optional field that silently
+  // disables authentication is exactly the regression this catches.
+  if (!deps.publicMode && !deps.authToken) {
+    throw new Error('authToken is required unless publicMode — refusing to serve the trading API unauthenticated');
+  }
+  const expectedTokenHash = deps.authToken
+    ? createHash('sha256').update(deps.authToken).digest()
+    : null;
+
   if (!deps.publicMode) {
     app.addHook('onRequest', async (req, reply) => {
       // The Host/Origin guard cannot stop framing: a page that iframes
@@ -129,6 +143,35 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return reply
           .code(403)
           .send({ ok: false, error: { category: 'auth', message: 'forbidden host/origin' } });
+      }
+
+      // The token gate. Scoped to /api DELIBERATELY: this hook runs before the
+      // static plugin, and the page + assets are what DELIVER the token — a
+      // broader check would 401 the very HTML that carries it.
+      //
+      // /api/health stays open: the installers poll it to decide whether the
+      // service came up (install.sh hard-fails on it), and it exposes nothing.
+      //
+      // Hash both sides before timingSafeEqual: it throws on unequal lengths,
+      // so comparing a raw attacker string would be a 500 — and hashing keeps
+      // the comparison constant-time whatever length arrives.
+      const pathname = req.url.split('?', 1)[0];
+      if (expectedTokenHash && pathname.startsWith('/api/') && pathname !== '/api/health') {
+        const given = req.headers['x-arb-token'];
+        const ok =
+          typeof given === 'string' &&
+          timingSafeEqual(createHash('sha256').update(given).digest(), expectedTokenHash);
+        if (!ok) {
+          return reply.code(401).send({
+            ok: false,
+            error: {
+              category: 'auth',
+              message: 'missing or invalid API token',
+              retryable: false,
+              hint: 'Reload the page. Scripting the API? Send the x-arb-token header — see the README.',
+            },
+          });
+        }
       }
     });
   }

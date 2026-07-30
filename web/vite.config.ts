@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import type { PluginOption } from 'vite';
 import { defineConfig } from 'vitest/config';
@@ -73,6 +76,25 @@ function landingHtml(): PluginOption {
   };
 }
 
+// Dev only: the backend requires x-arb-token on /api. The proxy attaches it
+// from the same file the backend wrote, so the token never enters the dev
+// bundle or the dev page. Read per request: `yarn dev` starts both processes
+// at once, so the file may not exist for the first moment — and this way a
+// rotated token needs no Vite restart.
+const devTokenFile = path.join(
+  process.env.DOTENV_CONFIG_PATH
+    ? path.dirname(path.resolve(process.env.DOTENV_CONFIG_PATH))
+    : fileURLToPath(new URL('..', import.meta.url)),
+  'api-token',
+);
+const readDevToken = (): string | null => {
+  try {
+    return fs.readFileSync(devTokenFile, 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+};
+
 export default defineConfig(({ mode }) => ({
   base: mode === 'landing' ? './' : '/',
   plugins: [react(), ...(mode === 'landing' ? [landingHtml()] : [])],
@@ -80,7 +102,16 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 8711,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:6688', changeOrigin: false },
+      '/api': {
+        target: 'http://127.0.0.1:6688',
+        changeOrigin: false,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            const t = readDevToken();
+            if (t) proxyReq.setHeader('x-arb-token', t);
+          });
+        },
+      },
     },
   },
   test: {

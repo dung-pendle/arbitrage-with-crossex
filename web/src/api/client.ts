@@ -35,6 +35,18 @@ function apiUrl(path: string): string {
   return new URL(`/api${path}`, origin).toString();
 }
 
+/** The per-install API token, injected into index.html by the backend that
+ * serves it. Absent in dev (the Vite proxy attaches the header server-side)
+ * and in the landing build; the untouched placeholder means the same thing —
+ * this page did not come from the terminal backend, so send nothing. */
+function authHeader(): Record<string, string> {
+  const t =
+    typeof document === 'undefined'
+      ? null
+      : document.querySelector('meta[name="arb-token"]')?.getAttribute('content');
+  return t && t !== '__ARB_TOKEN__' ? { 'x-arb-token': t } : {};
+}
+
 export async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   let resp: Response;
   try {
@@ -42,6 +54,7 @@ export async function fetchJson<T>(path: string, init: RequestInit = {}): Promis
       credentials: 'same-origin',
       ...init,
       headers: {
+        ...authHeader(),
         ...(init.body ? { 'content-type': 'application/json' } : {}),
         ...(init.headers ?? {}),
       },

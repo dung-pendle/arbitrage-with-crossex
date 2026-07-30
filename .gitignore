@@ -25,3 +25,6 @@ web/dist/
 
 # Local-only tooling.
 deploy/
+# per-install API token — written next to the .env (the repo root in a source
+# checkout). Never commit it: it is the credential the local API checks.
+api-token

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
-import { makeTestApp } from './helpers/gate-nock';
+import { HOST, makeTestApp } from './helpers/gate-nock';
 
 // /api/credentials never talks to Gate, so guard behavior is isolated here.
 const URL = '/api/credentials';
@@ -26,7 +26,7 @@ describe('host/origin guard', () => {
     const res = await app.inject({
       method: 'GET',
       url: URL,
-      headers: { host: 'localhost:6688', origin: 'http://localhost:6688' },
+      headers: { ...HOST, origin: 'http://localhost:6688' },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().ok).toBe(true);
@@ -46,7 +46,11 @@ describe('host/origin guard', () => {
 
   it('accepts bare localhost without a port', async () => {
     app = makeTestApp();
-    const res = await app.inject({ method: 'GET', url: URL, headers: { host: 'localhost' } });
+    const res = await app.inject({
+      method: 'GET',
+      url: URL,
+      headers: { ...HOST, host: 'localhost' },
+    });
     expect(res.statusCode).toBe(200);
   });
 
