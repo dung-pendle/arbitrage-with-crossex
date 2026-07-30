@@ -164,8 +164,70 @@ trade journal out from under a live process that is still placing orders.
   `raw.githubusercontent.com` — a 6-hourly read of this repo's one-line `version.json`
   to show "update available". Nothing is ever sent, and `UPDATE_CHECK=0` disables it.
   The installer downloads only from `nodejs.org` and `github.com`.
+- **Other accounts on your computer can't drive it.** Binding to loopback stops the
+  network; it does not stop another local process from simply calling the API. So every
+  request that can read your account or trade must carry a random token, created on
+  first run and stored — readable only by you — in `~/.boros-crossex/config/api-token`
+  (macOS) or `%LOCALAPPDATA%\CrossEx-Boros\config\api-token` (Windows). Your browser
+  gets it automatically from the page. The same limit as your keys applies, and it is
+  worth saying plainly: **anything running as you can read both.** Scripting the API
+  yourself:
+  `curl -H "x-arb-token: $(cat ~/.boros-crossex/config/api-token)" http://localhost:6688/api/positions`.
+  Rotate it by deleting the file and restarting the app (open tabs then need a reload).
 - **It can't withdraw your funds** — and if you created the key as described above,
   Gate.io enforces that at the account level too.
+
+## Install exactly what you audited
+
+The one-line installers above fetch the current tip of `main`. That is the right default
+for staying current, but it means the code can change between the moment you (or an AI)
+read it and the moment you run it — and again on every update. To close that gap:
+
+**1. Pin a commit.** Clone the repo and note the exact tree you are about to audit:
+
+```bash
+git clone https://github.com/mrenoon/crossex-boros-terminal
+cd crossex-boros-terminal
+git log -1 --format=%H     # ← this commit is what you are auditing
+```
+
+**2. Audit that tree** — read it yourself, or use the AI prompt below with the commit
+filled in.
+
+**3. Install that exact tree.** Either by ref (note the installer URL is pinned to the
+same commit, so the script you run is the one you read):
+
+```bash
+REF=<commit-sha>
+BOROS_REF=$REF /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/$REF/install.sh)"
+```
+
+```powershell
+$env:BOROS_REF = '<commit-sha>'
+irm "https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/$($env:BOROS_REF)/install.ps1" | iex
+```
+
+…or straight from the clone you just audited, with no second download at all:
+
+```bash
+git archive --format=tar.gz -o ../boros.tgz HEAD
+BOROS_TARBALL=../boros.tgz bash install.sh
+```
+
+**4. Check what you are running, any time.** **Settings → About** shows the version, the
+exact commit installed, and when — a source checkout says so instead. The same data is on
+`GET /api/version`.
+
+Re-running the plain one-liner takes you back to the tip of `main`; re-pin if you want to
+stay on an audited commit.
+
+**What is and isn't verified, honestly.** The Node.js runtime download is SHA-256-checked
+against nodejs.org's published manifest. The app archive comes from GitHub over TLS but is
+**not signed and carries no separate checksum** — GitHub's generated archives are not
+byte-stable, so publishing a hash of one would break spuriously and train you to ignore
+the failure. Pinning a commit and auditing that commit is the integrity story. JavaScript
+dependencies are locked by the committed `yarn.lock` files and installed with
+`--frozen-lockfile`.
 
 ## Verify this project yourself with AI
 
@@ -179,16 +241,22 @@ I'm considering installing an open-source crypto trading tool on my Mac, and I w
 to audit it before I run anything.
 
 Repository:  https://github.com/mrenoon/crossex-boros-terminal
-Installer I would run:  https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/install.sh
-Uninstaller:  https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/uninstall.sh
+Commit to audit:  <paste the commit SHA you pinned — or "main" for the current tip>
+Source tree at that commit:  https://github.com/mrenoon/crossex-boros-terminal/tree/<commit>
+Installer I would run:  https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/<commit>/install.sh
+Uninstaller:  https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/<commit>/uninstall.sh
 
 Please read the installer, the uninstaller, and the application source code, then answer:
 
 1. Does the installer ever ask for admin rights or use sudo? Does it write anywhere
    outside ~/.boros-crossex, ~/Library/LaunchAgents, ~/Library/Logs, and ~/Applications
    (macOS), or outside %LOCALAPPDATA%\CrossEx-Boros and the Start Menu (Windows)?
-2. What exactly does it download, from which domains, and are downloads
-   integrity-verified?
+2. What exactly does it download, from which domains, and how is each download
+   verified? The README claims: Node.js is SHA-256-verified against nodejs.org's
+   manifest; the app archive comes from github.com over TLS with no signature or
+   checksum of its own (pinning a commit with BOROS_REF and auditing that commit is
+   the integrity story); npm dependencies are pinned by committed lockfiles installed
+   with --frozen-lockfile. Verify each claim and flag anything that contradicts it.
 3. What background service does it install, and what are the exact commands to remove
    everything it added?
 4. Where are my exchange API keys stored, and do they ever leave my machine other than
@@ -257,6 +325,10 @@ GATE_API_SECRET=...
 
 Scripts run with `tsx` (no build step). If `node`/`yarn` aren't on your PATH, this repo was
 tested with nvm Node v22 — `nvm use 22` first.
+
+Install-time env vars (all optional): `BOROS_REF` (install an exact commit, tag or
+branch — see *Install exactly what you audited*), `BOROS_TARBALL`/`BOROS_ZIP` (install
+from a local archive), `BOROS_PORT`, `BOROS_ROOT`, `BOROS_REPO`, `BOROS_BRANCH`.
 
 Deployment-relevant env vars (all optional): `UPDATE_CHECK` (set `0` to disable the
 GitHub version check), `PORT` (default 6688), `ARB_DATA_DIR`

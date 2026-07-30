@@ -35,6 +35,10 @@ $ProgressPreference = 'SilentlyContinue'  # Invoke-WebRequest is far faster with
 # ---------------------------------------------------------------------------
 $RepoSlug = if ($env:BOROS_REPO)   { $env:BOROS_REPO }   else { 'mrenoon/crossex-boros-terminal' }
 $Branch   = if ($env:BOROS_BRANCH) { $env:BOROS_BRANCH } else { 'main' }
+# Pin an exact commit, tag or branch: BOROS_REF wins over BOROS_BRANCH. This is
+# how you install the very tree you audited - see "Install exactly what you
+# audited" in the README.
+$Ref      = $env:BOROS_REF
 $Port     = if ($env:BOROS_PORT)   { [int]$env:BOROS_PORT } else { 6688 }
 $Root     = if ($env:BOROS_ROOT)   { $env:BOROS_ROOT }   else { Join-Path $env:LOCALAPPDATA 'CrossEx-Boros' }
 $NodeLine = 'v24'
@@ -235,6 +239,41 @@ function Install-Yarn {
 # ---------------------------------------------------------------------------
 # Step 2+3: fetch the app and build it (staged in app.new, then swapped in)
 # ---------------------------------------------------------------------------
+# The commit a GitHub archive was cut from. `git archive` - which generates
+# every /archive/ download - stores the full sha as the ZIP's archive comment,
+# in the last bytes of the file. Exact, offline, no API call. Best effort by
+# design: an install must never fail over provenance.
+function Get-ArchiveCommit {
+  param([string]$Path)
+  try {
+    $fs = [IO.File]::OpenRead($Path)
+    try {
+      $take = [int][Math]::Min(1024, $fs.Length)
+      $fs.Seek(-$take, 'End') | Out-Null
+      $buf = New-Object byte[] $take
+      [void]$fs.Read($buf, 0, $take)
+      if ([Text.Encoding]::ASCII.GetString($buf) -match '([0-9a-f]{40})\s*$') { return $Matches[1] }
+    } finally { $fs.Dispose() }
+  } catch { }
+  return $null
+}
+
+# Record WHAT was installed, next to the code it describes: app.new is swapped
+# into place atomically, so this file can never describe a different tree.
+# Surfaced by the app in Settings -> About and on GET /api/version.
+function Write-InstallInfo {
+  param([string]$New, [string]$Commit, [string]$Requested, [string]$Source)
+  @{
+    schema       = 1
+    repo         = $RepoSlug
+    requestedRef = $Requested
+    commit       = $Commit
+    source       = $Source
+    installedAt  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+    installer    = 'install.ps1'
+  } | ConvertTo-Json | Set-Content -Path (Join-Path $New 'install-info.json') -Encoding UTF8
+}
+
 function Get-App {
   Say 'Downloading the app...'
   $new = Join-Path $Root 'app.new'
@@ -244,14 +283,28 @@ function Get-App {
   $stage = Join-Path $script:Tmp 'app-zip'
   New-Item -ItemType Directory -Force -Path $stage | Out-Null
   if ($env:BOROS_ZIP) {
-    Expand-Archive -Path $env:BOROS_ZIP -DestinationPath $stage -Force
+    $zip = $env:BOROS_ZIP
+    $requested = ''
+    $source = 'local-archive'
   } else {
     $zip = Join-Path $script:Tmp 'app.zip'
-    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$RepoSlug/archive/refs/heads/$Branch.zip" -OutFile $zip
-    Expand-Archive -Path $zip -DestinationPath $stage -Force
+    if ($Ref) {
+      $requested = $Ref
+      $url = "https://github.com/$RepoSlug/archive/$Ref.zip"
+    } else {
+      $requested = "refs/heads/$Branch"
+      $url = "https://github.com/$RepoSlug/archive/refs/heads/$Branch.zip"
+    }
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip
+    } catch {
+      Fail "could not download '$requested' from $RepoSlug - does it exist?"
+    }
+    $source = 'github-archive'
   }
-  # GitHub zips wrap everything in one <repo>-<branch> folder - strip it, the
-  # equivalent of tar --strip-components=1.
+  Expand-Archive -Path $zip -DestinationPath $stage -Force
+  # GitHub zips wrap everything in one folder (named for the ref, whatever its
+  # kind) - strip it, the equivalent of tar --strip-components=1.
   $inner = Get-ChildItem -Path $stage -Directory | Select-Object -First 1
   if (-not $inner) { Fail 'app download looks incomplete (empty archive).' }
   Get-ChildItem -Path $inner.FullName -Force | Move-Item -Destination $new
@@ -259,6 +312,7 @@ function Get-App {
   if (-not (Test-Path (Join-Path $new 'package.json'))) {
     Fail 'app download looks incomplete (no package.json).'
   }
+  Write-InstallInfo -New $new -Commit (Get-ArchiveCommit $zip) -Requested $requested -Source $source
 }
 
 function Build-App {

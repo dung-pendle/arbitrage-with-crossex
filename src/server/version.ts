@@ -36,6 +36,38 @@ export function readLocalVersion(repoRoot: string): string | null {
   }
 }
 
+/** What the installer recorded about the tree it laid down. Written into the
+ * app dir, so it is swapped atomically with the code it describes. */
+export interface InstallInfo {
+  repo: string | null;
+  requestedRef: string | null;
+  commit: string | null;
+  source: string | null;
+  installedAt: string | null;
+}
+
+/** Read `<repoRoot>/install-info.json`, or null when there is none — a source
+ * checkout has no installer provenance, and that is not an error. Fields are
+ * coerced and length-capped: a hand-edited file must not reshape the API. */
+export function readInstallInfo(repoRoot: string): InstallInfo | null {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, 'install-info.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    const str = (v: unknown): string | null =>
+      typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : null;
+    return {
+      repo: str(parsed.repo),
+      requestedRef: str(parsed.requestedRef),
+      commit: str(parsed.commit),
+      source: str(parsed.source),
+      installedAt: str(parsed.installedAt),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Piecewise-numeric compare ("1.10.0" > "1.9.9"; a leading "v" and differing
  * segment counts are tolerated, missing segments count 0). Returns null when

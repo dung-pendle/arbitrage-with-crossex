@@ -32,6 +32,10 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 REPO_SLUG="${BOROS_REPO:-mrenoon/crossex-boros-terminal}"
 BRANCH="${BOROS_BRANCH:-main}"
+# Pin an exact commit, tag or branch: BOROS_REF wins over BOROS_BRANCH. This is
+# how you install the very tree you audited — see "Install exactly what you
+# audited" in the README.
+REF="${BOROS_REF:-}"
 PORT="${BOROS_PORT:-6688}"
 ROOT="${BOROS_ROOT:-$HOME/.boros-crossex}"
 NODE_LINE="v24"
@@ -110,17 +114,61 @@ install_yarn() {
 # ---------------------------------------------------------------------------
 # Step 2+3: fetch the app and build it (staged in app.new, then swapped in)
 # ---------------------------------------------------------------------------
+# The commit a GitHub archive was cut from. `git archive` — which is what
+# generates every /archive/ download — stamps the full sha into the tarball's
+# pax global header, so this is exact, offline and needs no API call. Best
+# effort by design: a hand-rolled tarball has no header, and an install must
+# never fail over provenance.
+archive_commit() {
+  gzip -dc "$1" 2>/dev/null | dd bs=512 skip=1 count=1 2>/dev/null \
+    | LC_ALL=C grep -aoE '[0-9a-f]{40}' | head -1 || true
+}
+
+# Record WHAT was installed, next to the code it describes: app.new is swapped
+# into place atomically, so this file can never describe a different tree.
+# Surfaced by the app in Settings → About and on GET /api/version.
+write_install_info() {
+  local commit="$1" requested="$2" source="$3" esc
+  esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+  cat > "$ROOT/app.new/install-info.json" <<JSON
+{
+  "schema": 1,
+  "repo": "$(esc "$REPO_SLUG")",
+  "requestedRef": "$(esc "$requested")",
+  "commit": $( [ -n "$commit" ] && printf '"%s"' "$commit" || printf 'null' ),
+  "source": "$source",
+  "installedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "installer": "install.sh"
+}
+JSON
+}
+
 fetch_app() {
   say "Downloading the app…"
   rm -rf "$ROOT/app.new"
   mkdir -p "$ROOT/app.new"
+  local tgz requested source
   if [ -n "${BOROS_TARBALL:-}" ]; then
-    tar -xzf "$BOROS_TARBALL" -C "$ROOT/app.new" --strip-components=1
+    tgz="$BOROS_TARBALL"; requested=""; source="local-archive"
   else
-    curl -fsSL --retry 3 "https://github.com/$REPO_SLUG/archive/refs/heads/$BRANCH.tar.gz" \
-      | tar -xz -C "$ROOT/app.new" --strip-components=1
+    # Download to disk rather than streaming into tar: the commit stamp is read
+    # back out of the archive, and a truncated transfer can no longer leave a
+    # half-extracted app.new behind.
+    tgz="$TMP/app.tgz"
+    if [ -n "$REF" ]; then
+      requested="$REF"
+      curl -fsSL --retry 3 -o "$tgz" "https://github.com/$REPO_SLUG/archive/$REF.tar.gz" \
+        || fail "could not download ref '$REF' from $REPO_SLUG — does it exist?"
+    else
+      requested="refs/heads/$BRANCH"
+      curl -fsSL --retry 3 -o "$tgz" "https://github.com/$REPO_SLUG/archive/refs/heads/$BRANCH.tar.gz" \
+        || fail "could not download branch '$BRANCH' from $REPO_SLUG."
+    fi
+    source="github-archive"
   fi
+  tar -xzf "$tgz" -C "$ROOT/app.new" --strip-components=1
   [ -f "$ROOT/app.new/package.json" ] || fail "app download looks incomplete (no package.json)."
+  write_install_info "$(archive_commit "$tgz")" "$requested" "$source"
 }
 
 build_app() {

@@ -28,3 +28,6 @@ deploy/
 # per-install API token — written next to the .env (the repo root in a source
 # checkout). Never commit it: it is the credential the local API checks.
 api-token
+# installer provenance — written into the INSTALLED app dir, never the repo.
+# Committing one would ship a false "you are running commit X" to every user.
+install-info.json

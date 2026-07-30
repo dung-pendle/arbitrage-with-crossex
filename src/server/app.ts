@@ -67,6 +67,9 @@ export interface AppDeps {
   borosFetch?: FetchLike;
   /** Test seam for the GitHub update check (defaults to global fetch). */
   versionFetch?: FetchLike;
+  /** What the installer recorded about this tree (null in a source checkout).
+   * Echoed on GET /api/version so a user can see which commit they run. */
+  install?: import('./version').InstallInfo | null;
   /** Update check, set by the entry point (never in public mode): the running
    * copy's version from <repoRoot>/version.json — null means "unknown", which
    * disables the remote read entirely — plus the UPDATE_CHECK=0 opt-out. */

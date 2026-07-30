@@ -28,6 +28,7 @@ export function versionRoutes(deps: AppDeps) {
         remote !== null && current !== null && (compareVersions(remote.version, current) ?? 0) > 0;
       return reply.ok({
         current,
+        install: deps.install ?? null,
         latest: remote?.version ?? null,
         updateAvailable,
         // Highlights only when they describe a version the user doesn't have.

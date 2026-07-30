@@ -207,6 +207,7 @@ export function versionHandler(over: Partial<UpdateStatus> = {}) {
     HttpResponse.json(
       env<UpdateStatus>({
         current: '1.0.0',
+        install: null,
         latest: '1.0.0',
         updateAvailable: false,
         highlights: [],

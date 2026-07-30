@@ -89,6 +89,14 @@ export interface DisclaimerStatus {
 export interface UpdateStatus {
   /** The running copy's version (null = local version.json unreadable). */
   current: string | null;
+  /** What the installer recorded about this tree; null in a source checkout. */
+  install: {
+    repo: string | null;
+    requestedRef: string | null;
+    commit: string | null;
+    source: string | null;
+    installedAt: string | null;
+  } | null;
   /** The latest published version (null = remote unreadable / check disabled). */
   latest: string | null;
   updateAvailable: boolean;

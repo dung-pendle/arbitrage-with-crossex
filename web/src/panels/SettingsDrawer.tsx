@@ -10,6 +10,7 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
   const { data } = useCredentials();
   const { address, setAddress } = useTrackedAddress();
   const version = useVersion(); // same query key as the header pill — deduped
+  const install = version.data?.install ?? null;
 
   return (
     <Drawer open={open} title="Settings" onClose={onClose}>
@@ -63,11 +64,42 @@ export function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () =
           <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
             About
           </h3>
-          <div className="card num px-4 py-3 text-xs text-ink-200">
-            Version {version.data?.current ?? 'unknown'}
-            {version.data?.updateAvailable && version.data.latest
-              ? ` — v${version.data.latest} available`
-              : ''}
+          <div className="card px-4 py-3 text-xs text-ink-200">
+            <div className="num">
+              Version {version.data?.current ?? 'unknown'}
+              {version.data?.updateAvailable && version.data.latest
+                ? ` — v${version.data.latest} available`
+                : ''}
+            </div>
+            {/* Which code is actually running: the installer records the exact
+                commit it laid down, so "did I install what I audited?" has an
+                answer in the app. A checkout has no installer provenance. */}
+            <div className="num mt-1 text-[11px] text-ink-400">
+              {install ? (
+                <>
+                  {install.commit ? (
+                    install.repo ? (
+                      <a
+                        href={`https://github.com/${install.repo}/commit/${install.commit}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline decoration-ink-600 underline-offset-2 hover:text-ink-200"
+                      >
+                        {install.commit.slice(0, 9)}
+                      </a>
+                    ) : (
+                      install.commit.slice(0, 9)
+                    )
+                  ) : (
+                    'commit unknown'
+                  )}
+                  {install.requestedRef ? ` · ${install.requestedRef}` : ''}
+                  {install.installedAt ? ` · installed ${install.installedAt.slice(0, 10)}` : ''}
+                </>
+              ) : (
+                'source checkout'
+              )}
+            </div>
           </div>
         </section>
       </div>

@@ -41,6 +41,7 @@ describe('GET /api/version', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().data).toEqual({
       current: '1.0.0',
+      install: null,
       latest: '1.1.0',
       updateAvailable: true,
       highlights: ['a', 'b'],
@@ -75,6 +76,7 @@ describe('GET /api/version', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().data).toEqual({
       current: '1.0.0',
+      install: null,
       latest: null,
       updateAvailable: false,
       highlights: [],
@@ -123,7 +125,13 @@ describe('GET /api/version', () => {
     });
     const { data } = (await get()).json();
     expect(calls).toHaveLength(0);
-    expect(data).toEqual({ current: '1.0.0', latest: null, updateAvailable: false, highlights: [] });
+    expect(data).toEqual({
+      current: '1.0.0',
+      install: null,
+      latest: null,
+      updateAvailable: false,
+      highlights: [],
+    });
   });
 
   it('an unknown local version (the makeTestApp default) is network-free too', async () => {
@@ -135,6 +143,18 @@ describe('GET /api/version', () => {
     expect(calls).toHaveLength(0);
     expect(data.current).toBeNull();
     expect(data.updateAvailable).toBe(false);
+  });
+
+  it('echoes the installer provenance so the UI can show which commit runs', async () => {
+    const install = {
+      repo: 'mrenoon/crossex-boros-terminal',
+      requestedRef: 'refs/heads/main',
+      commit: 'f4f681af8b36c1bddc98048f214ff1405d56ca73',
+      source: 'github-archive',
+      installedAt: '2026-07-30T10:00:00Z',
+    };
+    app = makeTestApp({ updateCheck: { current: '1.0.0', disabled: true }, install });
+    expect((await get()).json().data.install).toEqual(install);
   });
 });
 
