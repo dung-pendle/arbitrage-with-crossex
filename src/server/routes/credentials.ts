@@ -73,7 +73,7 @@ export function credentialsRoutes(deps: AppDeps) {
         });
       }
 
-      rewriteEnvFile(svc.envPath, { GATE_API_KEY: key, GATE_API_SECRET: secret });
+      rewriteEnvFile(svc.envPath, { GATE_API_KEY: key, GATE_API_SECRET: secret }, svc.hardenConfigDir);
       process.env.GATE_API_KEY = key;
       process.env.GATE_API_SECRET = secret;
       svc.setClients(candidate);
@@ -90,7 +90,13 @@ export function credentialsRoutes(deps: AppDeps) {
  * mode 0600 then atomically rename over the target (a torn write can never truncate
  * the real .env), and re-assert 0600 in case the target pre-existed world-readable.
  */
-export function rewriteEnvFile(envPath: string, entries: Record<string, string>): void {
+export function rewriteEnvFile(
+  envPath: string,
+  entries: Record<string, string>,
+  /** Tighten the containing DIRECTORY too — only for a real config dir; in a
+   * source checkout that directory is the repo root (see the entry point). */
+  hardenConfigDir = false,
+): void {
   const dir = path.dirname(envPath);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); // first run: config dir may not exist
   const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
@@ -117,6 +123,6 @@ export function rewriteEnvFile(envPath: string, entries: Record<string, string>)
   fs.renameSync(tmp, envPath); // atomic on the same filesystem
   // The renamed file keeps tmp's 0600 on POSIX; on Windows neither the mkdir
   // nor the writeFile mode did anything, so set the ACL explicitly here.
-  restrictToOwner(dir);
+  if (hardenConfigDir) restrictToOwner(dir);
   restrictToOwner(envPath);
 }

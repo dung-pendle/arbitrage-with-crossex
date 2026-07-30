@@ -142,19 +142,51 @@ swap_app() {
 # ---------------------------------------------------------------------------
 # Step 4: LaunchAgent — keeps the server running, across reboots and crashes
 # ---------------------------------------------------------------------------
+# Only processes that are provably OUR server. `pgrep -f` alone is not enough:
+# it matches any process whose ARGUMENTS contain that path, so an editor, a
+# `tail -f` or a grep on the file would match — and these get SIGTERM then
+# SIGKILL. It also MISSES a server started from inside $ROOT/app with relative
+# arguments, which has no absolute path in its argv at all. So, mirroring what
+# the Windows scripts do: use pgrep as a cheap prefilter, then confirm by the
+# process's EXECUTABLE (lsof's `txt` fd is the ExecutablePath analogue, and
+# lsof is already required for the port check), plus an inverse sweep over the
+# private runtime's node binary that needs no command line whatsoever.
+# NOTE: lsof reports FULLY RESOLVED paths, and both $ROOT/node (a symlink to
+# the versioned dir) and $ROOT itself may be symlinked — so resolve first.
+# NOTE: `-a` in the sweep is load-bearing: lsof ORs its selection criteria
+# without it, which would match every process this user owns.
+# NOTE: on macOS `pgrep -a` means "include ancestors", NOT "print argv" as on
+# Linux — never use it here.
+server_pids() {
+  command -v pgrep >/dev/null 2>&1 || return 0
+  local uid pid exe rootdir out=""
+  uid="$(id -u)"
+  rootdir="$(cd "$ROOT" 2>/dev/null && pwd -P || true)"
+  if [ -z "$rootdir" ] || ! command -v lsof >/dev/null 2>&1; then
+    pgrep -U "$uid" -f "$ROOT/app/src/server/index.ts" 2>/dev/null || true
+    return 0
+  fi
+  for pid in $(pgrep -U "$uid" -f "$ROOT/app/src/server/index.ts" 2>/dev/null || true); do
+    exe="$(lsof -p "$pid" -a -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+    case "$exe" in "$rootdir"/node*/*) out="$out $pid" ;; esac
+  done
+  for pid in $(lsof -t -a -u "$uid" -- "$rootdir"/node-v*-darwin-*/bin/node 2>/dev/null || true); do
+    case " $out " in *" $pid "*) ;; *) out="$out $pid" ;; esac
+  done
+  echo $out
+}
+
 stop_stale_server() {
   # bootout stops the managed service, but a wedged instance — or one started by
   # hand, or an orphan a previous crash left behind — can survive and keep
-  # holding $PORT and the trade-journal lock, which would block the update. Reap
-  # it by the server's own path so NO unrelated node process is ever touched.
-  command -v pgrep >/dev/null 2>&1 || return 0
+  # holding $PORT and the trade-journal lock, which would block the update.
   local pids i
-  pids="$(pgrep -f "$ROOT/app/src/server/index.ts" 2>/dev/null || true)"
+  pids="$(server_pids)"
   [ -n "$pids" ] || return 0
   say "Stopping the previous version still running…"
   kill $pids 2>/dev/null || true              # SIGTERM first (clean shutdown)
   for i in 1 2 3 4 5 6; do
-    pids="$(pgrep -f "$ROOT/app/src/server/index.ts" 2>/dev/null || true)"
+    pids="$(server_pids)"
     [ -n "$pids" ] || return 0
     sleep 0.5
   done

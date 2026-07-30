@@ -53,6 +53,9 @@ export interface AppDeps {
   /** Enables PUT /api/credentials (validate → rewrite .env → hot-swap the client). */
   credentials?: {
     envPath: string;
+    /** Tighten the .env's PARENT directory too. False in a source checkout,
+     * where that parent is the repo root (see the entry point). */
+    hardenConfigDir?: boolean;
     setClients(clients: Clients): void;
   };
   /** Test seam for the Boros backend client (defaults to global fetch). */

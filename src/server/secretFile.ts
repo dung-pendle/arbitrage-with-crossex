@@ -18,8 +18,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
-
-const isWindows = process.platform === 'win32';
+import * as path from 'node:path';
 
 /**
  * The current user's SID. Names are not safe to grant against: USERNAME can fail
@@ -43,7 +42,6 @@ function currentWindowsSid(): string | null {
 
 /**
  * Restrict `target` (file or directory) to its owner.
- * `recurse` applies the grant to a directory's existing contents too.
  *
  * Order matters and is the whole point: grant FIRST, drop inheritance only once
  * the grant has succeeded, then verify the result is still readable/writable and
@@ -53,10 +51,11 @@ function currentWindowsSid(): string | null {
  * (SQLITE_CANTOPEN) with nothing to explain why. A slightly wider ACL is
  * recoverable; a folder nobody can open is not.
  */
-export function restrictToOwner(target: string, opts?: { recurse?: boolean }): void {
+export function restrictToOwner(target: string): void {
   try {
     if (!fs.existsSync(target)) return;
-    if (!isWindows) {
+    // Read at CALL time, not module load: tests force the Windows branch.
+    if (process.platform !== 'win32') {
       fs.chmodSync(target, fs.statSync(target).isDirectory() ? 0o700 : 0o600);
       return;
     }
@@ -78,17 +77,38 @@ export function restrictToOwner(target: string, opts?: { recurse?: boolean }): v
 
     // Prove we did not just lock ourselves out - of this path AND, for a
     // directory, of what is already inside it.
+    //
+    // By really OPENING the files, the way the app will. fs.accessSync was
+    // useless here and worse than useless: on Windows it maps to _waccess,
+    // which tests only the read-only ATTRIBUTE and never evaluates the DACL —
+    // so the empty-DACL lockout this check exists to catch sailed straight
+    // past it, while any read-only file sitting in the config dir tripped it
+    // and (via the old recursive `/reset /t /c`) reverted the protection on
+    // every single boot, silently. A real open goes through the security
+    // reference monitor; the reset below is scoped to this path only, and it
+    // says so out loud. Read-only-attributed entries are SKIPPED: they throw
+    // on an r+ open whatever the ACL says, so they are not evidence.
+    const probeOpen = (p: string): void => fs.closeSync(fs.openSync(p, 'r+'));
+    const writable = (p: string): boolean => (fs.statSync(p).mode & 0o200) !== 0;
     try {
-      fs.accessSync(target, fs.constants.R_OK | fs.constants.W_OK);
       if (isDir) {
+        const probe = path.join(target, `.probe-${process.pid}`);
+        fs.writeFileSync(probe, 'x');
+        probeOpen(probe); // re-open, not just create: that is what SQLite does
+        fs.unlinkSync(probe);
         for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
-          if (entry.isFile()) {
-            fs.accessSync(`${target}\\${entry.name}`, fs.constants.R_OK | fs.constants.W_OK);
-          }
+          if (!entry.isFile()) continue;
+          const p = path.join(target, entry.name);
+          if (writable(p)) probeOpen(p);
         }
+      } else if (writable(target)) {
+        probeOpen(target);
       }
-    } catch {
-      icacls(['/reset', '/t', '/c']);
+    } catch (err) {
+      console.warn(
+        `[secretFile] ${target} is not usable after tightening its permissions — restoring inherited access for it (${(err as Error).message})`,
+      );
+      icacls(['/reset']); // this path only: no /t, per install.ps1's own reasoning
     }
   } catch {
     /* best-effort: never block startup or a credential write on a permissions call */

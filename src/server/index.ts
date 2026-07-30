@@ -29,6 +29,9 @@ const dataDir = process.env.ARB_DATA_DIR
 const envPath = process.env.DOTENV_CONFIG_PATH
   ? path.resolve(process.env.DOTENV_CONFIG_PATH)
   : path.join(repoRoot, '.env');
+/** True when the .env sits in a config dir an installer chose, so tightening
+ * that DIRECTORY is hardening rather than clobbering someone's checkout. */
+const hardenConfigDir = Boolean(process.env.DOTENV_CONFIG_PATH);
 
 // The .env holds the live-money Gate secret. The credentials route writes it 0600,
 // but an .env created another way (hand-edited, an older install, a permissive
@@ -37,7 +40,14 @@ const envPath = process.env.DOTENV_CONFIG_PATH
 if (!publicMode) {
   // restrictToOwner, not chmod: on Windows the mode bits are ignored outright,
   // so the key file would just inherit its parent directory's ACL.
-  restrictToOwner(path.dirname(envPath));
+  //
+  // The FILE always. Its PARENT only when the .env lives in a dedicated config
+  // dir — i.e. when DOTENV_CONFIG_PATH is set, which only the installed
+  // layouts do (the LaunchAgent plist / the generated Windows runner). In a
+  // source checkout the .env's parent IS the repo root, and hardening that is
+  // not protection, it is damage: chmod 0700 on the whole checkout, and on
+  // Windows an inheritance strip plus a walk of every file in it.
+  if (hardenConfigDir) restrictToOwner(path.dirname(envPath));
   restrictToOwner(envPath);
 }
 
@@ -109,6 +119,7 @@ const appDeps = {
     ? undefined
     : {
         envPath,
+        hardenConfigDir,
         setClients: (clients: Clients) => {
           clientsRef.current = clients;
         },
