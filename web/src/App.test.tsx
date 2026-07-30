@@ -277,6 +277,25 @@ describe('App tab shell', () => {
 });
 
 describe('user guide', () => {
+  it('keeps ordered-list numbering when a list is interrupted', async () => {
+    mockApp();
+    server.use(
+      http.get(USER_GUIDE_RAW_URL, () =>
+        // A paragraph between items splits this into TWO <ol>s; the second
+        // arrives as <ol start="2"> and must not renumber from 1.
+        HttpResponse.text('# G\n\n1. first\n\nbetween\n\n2. second\n3. third'),
+      ),
+    );
+    await renderApp();
+    await userEvent.click(screen.getByRole('button', { name: 'User guide' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByText('second');
+    const lists = dialog.querySelectorAll('ol');
+    expect(lists).toHaveLength(2);
+    expect(lists[1]).toHaveAttribute('start', '2');
+  });
+
   it('renders the guide in-app from GitHub instead of navigating away', async () => {
     mockApp();
     server.use(

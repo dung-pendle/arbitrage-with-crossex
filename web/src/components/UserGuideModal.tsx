@@ -78,12 +78,22 @@ const components = {
       {children}
     </ul>
   ),
-  ol: ({ children }: { children?: ReactNode }) => (
-    <ol className="mb-3 flex list-decimal flex-col gap-2 pl-5 text-xs leading-relaxed text-ink-300 marker:text-ink-500">
+  // `start`/`value` must pass through: a markdown list interrupted by a
+  // paragraph (or a loosely-indented sub-list) parses as SEVERAL <ol>s, and
+  // dropping `start` renumbers every one of them from 1.
+  ol: ({ children, start }: { children?: ReactNode; start?: number }) => (
+    <ol
+      start={start}
+      className="mb-3 flex list-decimal flex-col gap-2 pl-5 text-xs leading-relaxed text-ink-300 marker:text-ink-500"
+    >
       {children}
     </ol>
   ),
-  li: ({ children }: { children?: ReactNode }) => <li className="pl-0.5">{children}</li>,
+  li: ({ children, value }: { children?: ReactNode; value?: string | number | readonly string[] }) => (
+    <li value={value} className="pl-0.5">
+      {children}
+    </li>
+  ),
   strong: ({ children }: { children?: ReactNode }) => (
     <strong className="font-semibold text-ink-100">{children}</strong>
   ),
