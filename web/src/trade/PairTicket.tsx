@@ -1,8 +1,8 @@
 /**
  * Delta-neutral pair ticket: one coin, a LONG venue and a SHORT venue, one
  * notional-per-leg. Two execution modes:
- *  - "Both market": both legs MARKET opens (taker × 2), submitted concurrently.
- *  - "Maker + hedge": one leg rests post-only one bid–ask gap BEHIND the touch
+ *  - "2 market orders": both legs MARKET opens (taker × 2), submitted concurrently.
+ *  - "Limit + hedge": one leg rests post-only one bid–ask gap BEHIND the touch
  *    (maker fee) and the engine auto-fires market hedges on the other leg as it
  *    fills; the maker venue is auto-chosen to minimize total fees (no manual
  *    override).
@@ -145,7 +145,7 @@ export function PairTicket() {
         { kind: 'open-market', symbol: shortSym, side: 'SELL', notional: notionalStr, pairGroupId, ...levS },
       ];
     }
-    // Maker + hedge: the maker leg rests POC at makerPriceStr (auto-tracked to the
+    // Limit + hedge: the maker leg rests POC at makerPriceStr (auto-tracked to the
     // touch until pinned); the other leg is the engine-fired market hedge.
     // NOTE: pegToTouch is NOT set here (it would leak into the preview payload);
     // it is injected at CONFIRM in `decorate` below when the price is tracking.
@@ -310,8 +310,8 @@ export function PairTicket() {
             setPricePinned(false);
           }}
           options={[
-            { value: 'market', label: 'Both market' },
-            { value: 'maker', label: 'Maker + hedge', sub: 'saves fees' },
+            { value: 'market', label: '2 market orders' },
+            { value: 'maker', label: 'Limit + hedge', sub: 'saves fees' },
           ]}
         />
       </div>

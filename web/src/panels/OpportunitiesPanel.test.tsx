@@ -933,7 +933,7 @@ describe('OpportunitiesPanel → PairTicket prefill', () => {
       expect(screen.getByLabelText('Notional per leg (USDT)')).toHaveValue('10000'),
     );
     const ticketModes = screen.getByRole('radiogroup', { name: 'Pair execution mode' });
-    expect(within(ticketModes).getByRole('radio', { name: /Maker \+ hedge/ })).toHaveAttribute(
+    expect(within(ticketModes).getByRole('radio', { name: /Limit \+ hedge/ })).toHaveAttribute(
       'aria-checked',
       'true',
     );

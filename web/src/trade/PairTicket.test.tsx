@@ -120,15 +120,15 @@ beforeEach(() => {
 });
 
 describe('PairTicket execution modes', () => {
-  it('defaults to "Maker + hedge"; "Both market" previews two plain open-market legs', async () => {
+  it('defaults to "Limit + hedge"; "2 market orders" previews two plain open-market legs', async () => {
     const calls: ActionInput[][] = [];
     server.use(...baseHandlers(), ...ethSymbolHandlers(), previewHandler({ calls }));
     await setupTwoVenuePair();
 
-    expect(screen.getByRole('radio', { name: /Maker \+ hedge/ })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('radio', { name: 'Both market' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('radio', { name: /Limit \+ hedge/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: '2 market orders' })).toHaveAttribute('aria-checked', 'false');
 
-    await userEvent.click(screen.getByRole('radio', { name: 'Both market' }));
+    await userEvent.click(screen.getByRole('radio', { name: '2 market orders' }));
     await waitFor(
       () => expect(calls.at(-1)?.[0]).toMatchObject({ kind: 'open-market', notional: '1000' }),
       { timeout: 4000 },
@@ -161,10 +161,10 @@ describe('PairTicket execution modes', () => {
     await setupTwoVenuePair();
     await waitForFirstPreview();
 
-    // Both market: the live two-sided quote (2499/2501 from the book handler)
+    // 2 market orders: the live two-sided quote (2499/2501 from the book handler)
     // and the market-order fill (2500.5 from the preview's fillEstimate) on
     // both legs.
-    await userEvent.click(screen.getByRole('radio', { name: 'Both market' }));
+    await userEvent.click(screen.getByRole('radio', { name: '2 market orders' }));
     expect(document.querySelector('[data-price-graph]')).not.toBeNull();
     await waitFor(() =>
       expect(
@@ -181,9 +181,9 @@ describe('PairTicket execution modes', () => {
     // Both-market mode has no resting limit.
     expect(document.querySelector('[data-mark="limit"]')).toBeNull();
 
-    // Maker + hedge (equal fees → the long leg rests): a cyan limit line appears
+    // Limit + hedge (equal fees → the long leg rests): a cyan limit line appears
     // on the maker leg once the price auto-tracks the touch.
-    await userEvent.click(screen.getByRole('radio', { name: /Maker \+ hedge/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /Limit \+ hedge/ }));
     await waitFor(() =>
       expect(document.querySelector('[data-leg="long"] [data-mark="limit"]')).not.toBeNull(),
     );
@@ -225,7 +225,7 @@ describe('PairTicket execution modes', () => {
     );
     await setupTwoVenuePair();
     await waitForFirstPreview();
-    await userEvent.click(screen.getByRole('radio', { name: /Maker \+ hedge/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /Limit \+ hedge/ }));
     // Price auto-tracks one gap behind the bid (unpinned): 2499 − 2 = 2497.
     await waitFor(() => expect(screen.getByLabelText(/Maker price/)).toHaveValue('2497'), { timeout: 4000 });
 
@@ -253,7 +253,7 @@ describe('PairTicket execution modes', () => {
     await setupTwoVenuePair();
     await waitForFirstPreview();
 
-    await userEvent.click(screen.getByRole('radio', { name: /Maker \+ hedge/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /Limit \+ hedge/ }));
 
     // Equal venue rates → auto-choice settles on the LONG leg (GATE, BUY maker),
     // so the tracked price is one gap behind the bid: 2499 − 2 = 2497.
@@ -310,7 +310,7 @@ describe('PairTicket execution modes', () => {
     await setupTwoVenuePair();
     await waitForFirstPreview();
 
-    await userEvent.click(screen.getByRole('radio', { name: /Maker \+ hedge/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /Limit \+ hedge/ }));
 
     const panel = makerPanel();
     expect(within(panel).getByText('OKX')).toBeInTheDocument();
@@ -348,7 +348,7 @@ describe('PairTicket execution modes', () => {
     await setupTwoVenuePair();
     await waitForFirstPreview();
 
-    await userEvent.click(screen.getByRole('radio', { name: /Maker \+ hedge/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /Limit \+ hedge/ }));
     const timeoutGroup = screen.getByRole('radiogroup', { name: 'Maker timeout' });
     await userEvent.click(within(timeoutGroup).getByRole('radio', { name: '15m' }));
     expect(within(timeoutGroup).getByRole('radio', { name: '15m' })).toHaveAttribute('aria-checked', 'true');
@@ -370,7 +370,7 @@ describe('PairTicket execution modes', () => {
     await setupTwoVenuePair();
     await waitForFirstPreview();
 
-    await userEvent.click(screen.getByRole('radio', { name: /Maker \+ hedge/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /Limit \+ hedge/ }));
     const priceInput = await screen.findByLabelText(/Maker price/);
     // One gap behind the touch: bid 2499 − (2501 − 2499) = 2497.
     await waitFor(() => expect(priceInput).toHaveValue('2497'), { timeout: 4000 });
@@ -493,7 +493,7 @@ describe('PairTicket prefill', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Notional per leg (USDT)')).toHaveValue('1235'));
     // Symbols resolved by venue → the preview fires with the mapped legs, in
-    // the ticket's default Maker + hedge shape (equal fees → the long leg
+    // the ticket's default Limit + hedge shape (equal fees → the long leg
     // rests as the maker, the short leg hedges at market).
     await waitFor(
       () => expect(calls.at(-1)?.[0]).toMatchObject({ notional: '1235', kind: 'open-limit' }),
@@ -545,9 +545,9 @@ describe('PairTicket prefill', () => {
     await userEvent.click(screen.getByRole('button', { name: 'fire-0' }));
 
     await waitFor(() =>
-      expect(screen.getByRole('radio', { name: /Maker \+ hedge/ })).toHaveAttribute('aria-checked', 'true'),
+      expect(screen.getByRole('radio', { name: /Limit \+ hedge/ })).toHaveAttribute('aria-checked', 'true'),
     );
-    expect(screen.getByRole('radio', { name: 'Both market' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('radio', { name: '2 market orders' })).toHaveAttribute('aria-checked', 'false');
     // Same invariant as the manual toggle: the maker price is not pinned.
     expect(screen.getByText(/tracking the book/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText('Notional per leg (USDT)')).toHaveValue('1000'));
@@ -562,11 +562,11 @@ describe('PairTicket prefill', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('radio', { name: /Maker \+ hedge/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /Limit \+ hedge/ }));
     await userEvent.click(screen.getByRole('button', { name: 'fire-0' }));
 
     await waitFor(() => expect(screen.getByLabelText('Notional per leg (USDT)')).toHaveValue('1000'));
-    expect(screen.getByRole('radio', { name: /Maker \+ hedge/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: /Limit \+ hedge/ })).toHaveAttribute('aria-checked', 'true');
   });
 });
 
