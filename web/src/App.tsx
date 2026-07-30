@@ -1,11 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
-import { useCredentials, useOpenOrders, usePositions } from './api/queries';
+import { useCredentials, useDisclaimer, useOpenOrders, usePositions } from './api/queries';
 import { AccountHealthStrip } from './components/AccountHealthStrip';
 import { BrandMark } from './components/BrandMark';
 import { Chip } from './components/Chip';
 import { DisclaimerGate } from './components/DisclaimerGate';
 import { FreshnessIndicator } from './components/FreshnessIndicator';
 import { UpdateIndicator } from './components/UpdateIndicator';
+import { markGuideHintDone, UserGuideHint } from './components/UserGuideHint';
 import { TableSkeleton } from './components/Skeleton';
 import { ACTIVE_TAB_KEY, isTabId, TabBar, TabPanel, type TabId } from './components/TabBar';
 import { readJson, writeJson } from './lib/storage';
@@ -38,6 +39,7 @@ export default function App() {
     readJson<TabId | null>(ACTIVE_TAB_KEY, null, (parsed) => (isTabId(parsed) ? parsed : null)),
   );
   const credentials = useCredentials();
+  const disclaimer = useDisclaimer();
   const openOrders = useOpenOrders();
   const positions = usePositions();
 
@@ -71,13 +73,21 @@ export default function App() {
   const headerControls = (
     <>
       <UpdateIndicator />
+      {/* Deliberately the loudest thing in the header after the tabs: new users
+          who miss it place real orders without knowing what the scan's
+          assumptions mean. */}
       <button
         type="button"
+        // The label carries the emoji; the a11y name stays plain.
+        aria-label="User guide"
         title="How to read the Opportunities scan and open a pair well"
-        onClick={() => setGuideOpen(true)}
-        className="self-center whitespace-nowrap text-xs text-ink-400 underline decoration-ink-600 underline-offset-2 transition-colors hover:text-ink-100"
+        onClick={() => {
+          markGuideHintDone();
+          setGuideOpen(true);
+        }}
+        className="self-center whitespace-nowrap rounded-md border border-cyan-400/70 bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-300 shadow-[0_0_0_1px_rgba(34,211,238,0.15)] transition-colors hover:border-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-200"
       >
-        User guide
+        📖 User guide
       </button>
       <FreshnessIndicator />
       <button
@@ -104,6 +114,13 @@ export default function App() {
     <TradeFlowProvider>
       <TrackedAddressProvider onOpenSettings={openSettings}>
         <DisclaimerGate />
+        {/* Only once the terminal is usable: the disclaimer gate is a locked
+            modal, and the first-run view already leads with its own setup
+            guide — a second nudge on top of either is noise. */}
+        <UserGuideHint
+          enabled={configured && disclaimer.data?.accepted === true}
+          onOpen={() => setGuideOpen(true)}
+        />
         <div className="flex min-h-full flex-col">
           {/* The tab strip lives INSIDE the sticky header so it can never be
               hidden under it — the header wraps to two rows on narrow screens,
