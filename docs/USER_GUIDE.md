@@ -1,81 +1,109 @@
 # User guide
 
-A short guide to the two screens you'll use most: the **Opportunities** scan and the
-**order ticket**. Everything here is descriptive, not advice — see [DISCLAIMER.md](./DISCLAIMER.md).
+In this guide, we will cover:
+1. How the strategy works
+2. The recommended flow for using CrossEx Boros Terminal
+3. How to maximise return
+4. What could go wrong
 
----
+## 1. How the strategy works
 
-## The Opportunities tab
+Perp traders pay (or earn) a floating funding rate. On [Boros](https://boros.pendle.finance), that funding rate is itself tradable — and the same coin's funding often carries **different implied fixed rates on different venues**: say ETH funding priced at 8% APR on Hyperliquid but 5% on Binance. The strategy locks in that gap.
 
-The scan finds Boros market pairs (same collateral, same maturity, same underlying) and prices
-the **whole 4-leg trade at your size** — the headline is the net fixed APR **on the capital the
-trade consumes**, after every cost the app can model. The assumptions you pick decide what that
-number means, so set them to match how you would actually trade:
+One position is 4 legs, all at the same notional:
 
-- **Size** — under *Market at size*, every rate is produced by walking real order books at this
-  notional per leg. Set it to what you would genuinely deploy: a bigger size eats deeper into
-  the books (worse executable rates), and a group whose books can't carry the size **silently
-  drops off the list** — if raising the size makes rows vanish, depth is why. A tiny
-  placeholder size makes everything look better than you can have.
+- **2 rate legs on Boros** - short the funding of the expensive market (you *receive* its fixed rate) and long the funding of the cheap one (you *pay* its fixed rate). Receive 8%, pay 5% → ~3% locked until the market's maturity.
+- **2 perp legs via CrossEx** - a short perp on the first venue, a long perp on the second, both opened through [Gate CrossEx](https://www.gate.com/crossex) under one **unified margin** account. Each perp leg's funding cancels the floating funding its Boros leg owes, and the two perps cancel each other's price exposure - with the shared margin, one leg's gain collateralises the other's loss.
 
-- **Boros entry: "Market at size" vs "At mark rate"** — how the two Boros legs get their fixed
-  rates. *Market at size* walks the live Boros books as a taker: the spread you could lock
-  **right now**, paying the bid–ask gap and your own impact. *At mark rate* assumes you rest
-  limit orders patiently and get filled at the mark APR: cheaper on paper, but a hope, not a
-  price — the market has to come to you. Decide with *Market at size*; use *At mark rate* only
-  to see what patience could add.
+Once everything nets out there is no price exposure and no floating-rate exposure left — just the fixed spread, earned on the notional until maturity. The Opportunities scan prices that spread at your size, subtracts every cost it can model (Boros fees and price impact, perp fees and slippage, entry and exit), and shows what remains as a **net fixed APR on the capital** the four legs actually consume as margin.
 
-- **Perp entry: "Both market" vs "Maker + hedge"** — how the two hedge perps get opened.
-  *Both market* crosses both legs immediately: certain and instant, but you pay two taker fees
-  and both spreads. *Maker + hedge* rests one leg post-only (maker fee, no crossing cost) and
-  hedges each fill on the other venue as it happens: cheaper, at the cost of fill time and a
-  possible timeout. The scan's cost ledger follows whichever you pick.
+Boros Academy walks through this strategy in more depth: [Fixed-Return Funding Arbitrage](https://docs.pendle.finance/boros-academy/advanced-strategies/fixed-return-funding-arbitrage).
 
-- **Exit: "Close" vs "Roll over"** — *Close* folds in the estimated perp exit fees plus exit
-  slippage priced by crossing back out of today's books (the opposite side of the same
-  snapshot) — the conservative, all-in number. *Roll over* charges no exit costs, assuming you
-  keep the perps and roll into the next maturity.
+Fixed does not mean risk-free - see section 4.
 
-- **Fee tier** — before you connect Gate keys you can pick a simulated VIP tier to see how fees
-  move the result; once connected, the scan always prices from your account's real schedule
-  (and the selector disappears).
+## 2. The recommended flow for using CrossEx Boros Terminal
+You will use the tool for 3 things, in order:
 
-Reading a row: the **net APR on capital** is directly comparable to "Fixed APR on capital" on
-your open positions — same formula, modelled capital (Boros initial margin + perp margin at
-venue max leverage). Expand a row for the full cost waterfall; every cost the app cannot know
-shows as a named reason, never a silent zero.
+### A. Discover and understand opportunities
+A few things to note about the assumptions:
+- Your current Gate VIP level is already factored in
+- Other than that, its all about understanding the other assumptions:
+![The assumptions bar above the Opportunities scan — notional, perp entry, at-maturity and Boros entry](./Assumptions.png)
+- For perp entry, "Limit + hedge" means the terminal will place a limit order on exchange A, wait for it to be filled, and immediately market order on the other exchange to hedge. This will save on perp fees (because maker fees is cheaper than taker fees)
+- At maturity, if you do not need to close the Perp positions (and be able to lock in another Boros spread in a subsequent 4-legged position), it's called a "Roll over" (instead of "Close"), which saves the perp fees.
+- On Boros, "At mark rate" assumes you can enter the Boros legs without any price impact (which could be unrealistic). "Market at size" assumes you do market orders on Boros for both legs. An optimised execution is to try to fill limit orders on one or two legs, to reduce price impact (and fees).
 
----
+Other than that, the details are pretty self-explanatory. Try toggling the assumptions to see how it affects the PnL items.
+![Opportunities details](./OpportunitiesDetails.png)
 
-## The order ticket — opening a pair well
+Note that you can click "Execute it" on an opportunity to pre-populate the forms for executing it.
 
-Open the pair ticket from an Opportunities row (**Execute it**): it lands prefilled with the
-venues, your scan size and the scan's execution mode, so the ticket prices exactly what the
-scan promised. Nothing is submitted until you hold Execute.
+### B. Execute a 4-legged Funding Rate Arbitrage position
+It's recommended to open the Boros legs first, before opening the Perp legs. This is because the price impact from opening Boros position is higher and more uncertain, so you should "lock in" the Boros spread first before executing the whole 4-legged position.
 
-The pair ticket opens both perp legs **delta-neutral** — one long, one short, same size. The
-usual best path:
+Do set your Boros address, so that your Boros position can be tracked.
 
-1. **Pick "Maker + hedge"** execution. The ticket automatically rests the maker leg on the
-   venue where resting is cheaper and shows the saving; the other leg hedges each maker fill
-   with a taker order on the next engine tick, so unhedged exposure is bounded by roughly one
-   tick plus one order-resolution window.
-2. **Leave the price on "track book"** — each time the engine places or re-places the maker it
-   derives the price one bid–ask gap *behind* the same-side touch, so it can never cross. A
-   live resting order is deliberately **not** chased as the book moves — use the deal view's
-   **Re-peg** to follow a moving market. Type a price only when you want to pin it (the engine
-   then holds *your* price and ignores the book).
-3. **Set a maker timeout** — if the maker leg hasn't fully filled in time, the remainder is
-   converted with market IOC clips instead of hanging half-open forever. Pick a timeout that
-   matches how urgent the entry is.
-4. **Leverage is per leg at each venue's max** — the same assumption the scan's capital number
-   used, applied automatically before the deal is created.
-5. **Hold Execute.** One deal is created; the live deal view opens and tracks it.
+#### Executing the 2 perp legs
 
-After submission the deal engine owns the orders: it hedges every fill, re-derives the maker
-price whenever it re-places the order, and raises an alert if anything cannot be hedged. Use the deal view's own **Stop** /
-**Convert now** / **Re-peg** controls rather than cancelling orders by hand — a hand-cancelled
-engine order reads as an instruction to abandon the remaining acquisition.
 
-Closing works the same way in reverse: closes are reduce-only, and the slippage band you set is
-enforced on the wire (an IOC limit at reference ± band), not just displayed.
+Executing with "2 market orders" is relatively straight forward.
+
+As for executing the "Limit + hedge" default option, there are a few things to note:
+1. The Limit (maker) side is auto chosen to minimise total fees
+2. This is the default flow:
+- There is an initial Maker price (that is automatically set to be slightly beyond the best bid/best ask). You can also manually set this.
+- After you click "Execute pair", a limit order is immediately placed at the initial maker price.
+- Whenever the limit order is filled (or partially filled), we automatically execute taker order (market order) to hedge the amount that were filled, repeat until the whole limit order is fully filled.
+- If the countdown until convert (default to 5 min) goes to zero and the trade is still not fully executed, the system will cancel the limit order and complete the pair through market orders. If you do not wish for this to happen, you can click Stop before the time runs out.
+3. If the limit order is still not filled for some time (for example when you set a manual price that is far away), you can click "Re-peg to touch" to move the limit order close to the best bid/best ask. There is also an option to Re-peg to a custom price.
+![Re-peg to touch](./RepegToTouch.png)
+
+__Important:__
+- You should try executing a test amount first, to get familiar with the flow, before executing a bigger amount
+- When executing a large position, it's recommended to manually break it into a few executions (for example, do 5x 100k instead of 500k in one go)
+
+### C. Monitor your position
+Once opened, there's not much maintenance you need to do on a 4-legged position, except for when to close the two perp legs at maturity (if you don't roll over
+into the next maturity).
+
+What's most useful is to understand and breakdown the PnL for your positions.
+![Current position](./CurrentPosition.png)
+
+There are two options for an open 4-legged position:
+- **Close the perp legs at maturity**. This is the default, and you need to incur another set of Perp trading fees. The chart uses the same fees and slippage as when you opened the perp legs.
+- **Roll over**: this means you don't need to pay perp fees for closing, which boosts your overall return. To do this, you need to be able to lock a decent spread on Boros, on the same perp pair, on a next maturity.
+
+## 3. How to maximise return
+These few factors move the needle the most in maximising your return on the 4-legged Funding Rate Arbitrage
+1. Reduce perp fees with a higher VIP tier in Gate.
+  * Play around with the VIP tier assumption in https://crossexboros.com, and you will see the immediate impact of your VIP tier on the potential returns.
+  * As an example, my current VIP8 tier boosts a particular opportunity from 11.3% APR to 16.2% APR. For reference, I need a 400k capital in Gate to get VIP8 tier.
+2. Rolling over
+  * Being able to roll over an existing 4-legged position into the next maturity is a powerful boost to your return
+  * The boost is two-fold: the existing position will escape the perp closing fees, and the new position will escape the perp opening fees. Just change the assumption from Close to Roll-over to see the impact on the return.
+  * If you manage to keep rolling over, the subsequent 4-legged position wont have to pay a single cent of perp fees (for both entry and exit), which boosts the return even more.
+3. Reduce perp fees + slipapge through an optimised execution of Limit + hedge
+  * The goal is to minimise slipapge when executing the Limit + hedge. Its even possible to get possible slippage (for example, short Hyperliquid ETH at 1601, long OKX ETH at 1600)
+  * Its best to execute when the market is generally more calm, reducing risks for big slippage
+  * Its best to break a big trade (lets say 1M notional) into multiple rounds, to reduce the average slippage
+  * To be the most careful, always manually set the maker price at a price relatively further away, and do the execution in the Deal modal. At the deal modal, its a mini-game of re-pegging the limit order price decently close to market, patiently wait for it to get hit (say by other impatient users on the perp), trying to get an optimised slippage.
+4. Optimise Boros spread
+  * To optimise for the spread you are locking, try to use limit orders to fill at least one Boros leg, and do a market order on the other leg. Sometimes, it can give you a much higher spread.
+  * That said, sometimes when a decent opportunity are there that you can just market order, you could just take it (otherwise, some other users might take it before you)
+
+## 4. What could go wrong
+Last, let's see the different ways things could go wrong:
+1. Issues with Gate as an exchange.
+- Your money sits within Gate. Anything happening to Gate will affect your money
+2. Issues with CrossEx as a cross-margin platform
+- CrossEx might malfunction as a platform (for example, if CrossEx itself is deleveraged or liquidated on some exchange), and your position on CrossEx might not hold
+3. Liquidation of Perp positions due to extreme perp price differences.
+- The prices on the two perps could, for some reason, deviate so much that even a delta-neutral perp pair could get liquidated. This is extremely unlikely, but could still happen in theory
+4. Liquidation of Boros positions:
+- If the Boros market prices move too much away from the spread you locked in, your Boros position could be liquidated, and the 4-legged position's fixed return is compromised.
+- To avoid this, its advisable to maintain a buffer on the Boros margin (especially when Boros margin is relatively non-capital-intensive)
+5. Issues with CrossEx Boros Terminal:
+- Any issues that result in opening a non-hedged pair of perp positions will expose you to losses due to price fluctuation.
+- Its advisable to double check that your perp positions are hedged after execution.
+
+Ultimately, you should do your own research, make sense of all the different risks and rewards, and make the decisions for yourself.
