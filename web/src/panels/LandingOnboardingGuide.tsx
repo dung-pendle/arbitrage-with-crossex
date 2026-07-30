@@ -70,7 +70,9 @@ export function LandingOnboardingGuide() {
                 Don’t take our word for it — paste this into whichever assistant you trust
                 (ChatGPT, Claude, Gemini) and have it read the source:
               </span>
-              <CopyBlock text={AUDIT_PROMPT} label="Copy audit prompt" />
+              {/* The prompt is ~15 lines and would otherwise be the tallest
+                  thing in the rail — show a few and let it scroll. */}
+              <CopyBlock text={AUDIT_PROMPT} label="Copy audit prompt" maxHeightClass="max-h-20" />
             </div>
             <div
               ref={installRef}
