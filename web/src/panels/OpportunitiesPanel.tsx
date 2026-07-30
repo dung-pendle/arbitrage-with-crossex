@@ -68,7 +68,7 @@ const BOROS_ENTRY_OPTIONS: { value: BorosEntryMode; label: string }[] = [
 ];
 
 const ENTRY_MODE_LABEL: Record<EntryMode, string> = {
-  'both-market': 'Both market',
+  'both-market': '2 market orders',
   'maker-hedge': 'Maker + hedge',
 };
 

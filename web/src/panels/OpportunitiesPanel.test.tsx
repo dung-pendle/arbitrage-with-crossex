@@ -661,6 +661,25 @@ describe('OpportunitiesPanel — the assumptions strip', () => {
     );
   });
 
+  it('labels the perp entry modes as "2 market orders" and "Maker + hedge"', async () => {
+    const urls: string[] = [];
+    server.use(opportunitiesHandler(makeOpportunitiesResult(), { urls }));
+    renderWithClient(<OpportunitiesPanel />);
+
+    await waitFor(() => expect(urls).toHaveLength(1));
+    await openAssumptions();
+
+    // Names the two ways the perp legs get opened; "2 market orders" says how
+    // many orders go out, which "Both market" left the reader to infer.
+    const entry = screen.getByRole('radiogroup', { name: 'Perp entry mode' });
+    expect(within(entry).getByRole('radio', { name: '2 market orders' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(within(entry).getByRole('radio', { name: 'Maker + hedge' })).toBeInTheDocument();
+    expect(within(entry).queryByRole('radio', { name: /Both market/ })).toBeNull();
+  });
+
   it('reveals the custom size input and debounces it into the query', async () => {
     const urls: string[] = [];
     server.use(opportunitiesHandler(makeOpportunitiesResult(), { urls }));
