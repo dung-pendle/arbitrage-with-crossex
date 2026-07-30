@@ -1,6 +1,6 @@
-/** The public rail: six steps collapsed to their titles, an OS-aware install
- * command, and the paste-into-your-own-LLM audit prompt. No key surface may
- * ever appear here. */
+/** The public rail: five steps collapsed to their titles, with step 1 open and
+ * carrying the paste-into-your-own-LLM audit prompt above an OS-aware install
+ * command. No key surface may ever appear here. */
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -13,51 +13,62 @@ async function openStep(name: RegExp) {
 }
 
 describe('LandingOnboardingGuide', () => {
-  it('leads with install, then the audit step, before anything touching Gate', () => {
+  it('is five steps, install first, before anything touching Gate', () => {
     renderWithClient(<LandingOnboardingGuide />);
 
     const steps = screen.getAllByRole('listitem');
-    expect(steps).toHaveLength(6);
+    expect(steps).toHaveLength(5);
     expect(within(steps[0]).getByRole('heading')).toHaveTextContent('Install the terminal');
-    // Auditing comes BEFORE the visitor is asked to fund anything or make a key.
-    expect(within(steps[1]).getByRole('heading')).toHaveTextContent('Audit it with your own AI');
-    expect(within(steps[2]).getByRole('heading')).toHaveTextContent('Fund Gate');
-    expect(within(steps[4]).getByRole('heading')).toHaveTextContent('Create your API key');
+    expect(within(steps[1]).getByRole('heading')).toHaveTextContent('Fund Gate');
+    expect(within(steps[3]).getByRole('heading')).toHaveTextContent('Create your API key');
   });
 
-  it('opens step 1 and collapses the rest — the install command is what a visitor needs', () => {
+  it('offers the audit inside step 1, above the install command', () => {
+    renderWithClient(<LandingOnboardingGuide />);
+
+    const install = within(screen.getAllByRole('listitem')[0]);
+    const audit = install.getByRole('button', { name: 'Copy audit prompt' });
+    const command = install.getByRole('button', { name: 'Copy command' });
+    // Both live in step 1, and reading the source comes before running it.
+    expect(audit).toBeVisible();
+    expect(command).toBeVisible();
+    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(audit.compareDocumentPosition(command) & FOLLOWING).toBeTruthy();
+    // ...and not the other way round, so the direction is genuinely pinned.
+    expect(command.compareDocumentPosition(audit) & FOLLOWING).toBeFalsy();
+  });
+
+  it('opens step 1 and collapses the rest', () => {
     renderWithClient(<LandingOnboardingGuide />);
 
     expect(screen.getByRole('button', { name: /^Install the terminal/ })).toHaveAttribute(
       'aria-expanded',
       'true',
     );
-    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(5);
-    // The other bodies are mounted but hidden, so nothing inside them is reachable.
-    expect(screen.queryByRole('button', { name: 'Copy audit prompt' })).toBeNull();
-    expect(screen.getByText(/Audit this open-source tool/)).not.toBeVisible();
+    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(4);
+    // A collapsed body is mounted but hidden, so nothing inside it is reachable.
+    expect(screen.getByText(/gate\.com\/signup/)).not.toBeVisible();
     expect(screen.getByText(/\/bin\/bash -c/)).toBeVisible();
   });
 
   it('expands a step on click and collapses it again', async () => {
     renderWithClient(<LandingOnboardingGuide />);
 
-    await openStep(/^Audit it with your own AI/);
-    const header = screen.getByRole('button', { name: /^Audit it with your own AI/ });
+    await openStep(/^Fund Gate/);
+    const header = screen.getByRole('button', { name: /^Fund Gate/ });
     expect(header).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Copy audit prompt' })).toBeInTheDocument();
+    expect(screen.getByText(/gate\.com\/signup/)).toBeVisible();
 
     await userEvent.click(header);
     expect(header).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('button', { name: 'Copy audit prompt' })).toBeNull();
+    expect(screen.getByText(/gate\.com\/signup/)).not.toBeVisible();
   });
 
-  it('offers the audit prompt with the questions that matter for a key-holding tool', async () => {
+  it('offers the audit prompt with the questions that matter for a key-holding tool', () => {
     renderWithClient(<LandingOnboardingGuide />);
-    await openStep(/^Audit it with your own AI/);
 
     const prompt = screen.getByText(/Audit this open-source tool/);
-    expect(prompt).toHaveTextContent('github.com/mrenoon/boros-crossex-terminal');
+    expect(prompt).toHaveTextContent('github.com/mrenoon/crossex-boros-terminal');
     expect(prompt).toHaveTextContent(/send my API keys.*off my machine/s);
     expect(prompt).toHaveTextContent(/withdraw funds/);
     expect(prompt).toHaveTextContent(/install\.sh \(macOS\) and install\.ps1 \(Windows\)/);

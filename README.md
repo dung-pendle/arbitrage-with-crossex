@@ -35,7 +35,7 @@ Paste this into the **Terminal** app (Finder → Applications → Utilities → 
 press Return:
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mrenoon/boros-crossex-terminal/main/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/install.sh)"
 ```
 
 When it finishes (a few minutes the first time), the terminal opens in your browser at
@@ -55,7 +55,7 @@ PowerShell** is fine — no need to install anything first). Press `Win`, type
 `PowerShell`, open it, then paste:
 
 ```powershell
-irm https://raw.githubusercontent.com/mrenoon/boros-crossex-terminal/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/install.ps1 | iex
 ```
 
 When it finishes, the terminal opens in your browser at **http://localhost:6688** —
@@ -122,7 +122,7 @@ for a Gate.io API key:
 **macOS**
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mrenoon/boros-crossex-terminal/main/uninstall.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/uninstall.sh)"
 ```
 
 Keys and trade history in `~/.boros-crossex` are kept; append ` -- --purge` to remove
@@ -131,13 +131,13 @@ those too (or `rm -rf ~/.boros-crossex`).
 **Windows**
 
 ```powershell
-irm https://raw.githubusercontent.com/mrenoon/boros-crossex-terminal/main/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/uninstall.ps1 | iex
 ```
 
 Keys and trade history in `%LOCALAPPDATA%\CrossEx-Boros` are kept. To remove those too:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/mrenoon/boros-crossex-terminal/main/uninstall.ps1))) -Purge
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/uninstall.ps1))) -Purge
 ```
 
 Either way this stops and removes the background service, the app, its private Node.js
@@ -178,9 +178,9 @@ of this repo for an even deeper read.
 I'm considering installing an open-source crypto trading tool on my Mac, and I want you
 to audit it before I run anything.
 
-Repository:  https://github.com/mrenoon/boros-crossex-terminal
-Installer I would run:  https://raw.githubusercontent.com/mrenoon/boros-crossex-terminal/main/install.sh
-Uninstaller:  https://raw.githubusercontent.com/mrenoon/boros-crossex-terminal/main/uninstall.sh
+Repository:  https://github.com/mrenoon/crossex-boros-terminal
+Installer I would run:  https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/install.sh
+Uninstaller:  https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/uninstall.sh
 
 Please read the installer, the uninstaller, and the application source code, then answer:
 

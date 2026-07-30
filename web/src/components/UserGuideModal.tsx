@@ -15,7 +15,7 @@ import remarkGfm from 'remark-gfm';
 import { Modal } from './Modal';
 import { Skeleton } from './Skeleton';
 
-const REPO = 'mrenoon/boros-crossex-terminal';
+const REPO = 'mrenoon/crossex-boros-terminal';
 const BRANCH = 'main';
 const DOC = 'docs/USER_GUIDE.md';
 
@@ -29,6 +29,20 @@ function absolute(href: string | undefined): string {
   if (!href) return USER_GUIDE_HTML_URL;
   if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')) return href;
   return new URL(href.replace(/^\.\//, ''), DOC_BASE).toString();
+}
+
+/** Screenshots are written relative too ("./Assumptions.png") and must load as
+ * bytes, not as a GitHub page — so they resolve against raw, alongside the doc.
+ * Anything that lands outside the repo's own raw tree is dropped rather than
+ * fetched: the document is remote, and it does not get to point the app at
+ * arbitrary hosts. */
+const IMG_BASE = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/docs/`;
+function imageSrc(src: string | undefined): string | undefined {
+  if (!src) return undefined;
+  const url = /^[a-z][a-z0-9+.-]*:/i.test(src)
+    ? src
+    : new URL(src.replace(/^\.\//, ''), IMG_BASE).toString();
+  return url.startsWith(IMG_BASE) ? url : undefined;
 }
 
 const Ext = ({ href, children }: { href?: string; children?: ReactNode }) => (
@@ -78,6 +92,19 @@ const components = {
   ),
   hr: () => <hr className="my-5 border-ink-800" />,
   a: Ext,
+  // Screenshots are wider than the modal — they scale down, never widen it.
+  img: ({ src, alt }: { src?: string; alt?: string }) => {
+    const resolved = imageSrc(src);
+    if (!resolved) return null;
+    return (
+      <img
+        src={resolved}
+        alt={alt ?? ''}
+        loading="lazy"
+        className="mb-3 block h-auto max-w-full rounded-lg border border-ink-800"
+      />
+    );
+  },
   code: ({ children }: { children?: ReactNode }) => (
     <code className="num rounded border border-ink-700 bg-ink-950 px-1 py-0.5 text-[11px] text-ink-200">
       {children}

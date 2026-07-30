@@ -25,9 +25,10 @@ export function LandingOnboardingGuide() {
   const [os, setOs] = useState<Os>(detectOs);
   const windows = os === 'windows';
 
-  // Only step 1 starts open: the install command is what a first-time visitor
-  // needs in front of them, while six steps of full content would bury the live
-  // rates that are the actual pitch. The rest read as scannable titles.
+  // Only step 1 starts open: the install command — and the audit prompt above it
+  // — are what a first-time visitor needs in front of them, while five steps of
+  // full content would bury the live rates that are the actual pitch. The rest
+  // read as scannable titles.
   const [openSteps, setOpenSteps] = useState<ReadonlySet<number>>(() => new Set([1]));
   const toggle = (n: number) =>
     setOpenSteps((prev) => {
@@ -56,12 +57,21 @@ export function LandingOnboardingGuide() {
       <div className="card px-5 py-5">
         <h2 className="text-xl font-bold tracking-tight text-ink-100">How to execute</h2>
         <p className="mt-1.5 text-xs leading-relaxed text-ink-300">
-          Every number on the left is live. Six steps and you can take them.
+          Every number on the left is live. Five steps and you can take them.
         </p>
         <ol className="mt-5 flex flex-col gap-[18px]">
           <Step n={1} title="Install the terminal" active {...step(1)}>
-            Runs locally on your own machine — free and <Ext href={REPO_URL}>open source</Ext>. Pick
-            your system, paste the command, press Return:
+            Runs locally on your own machine — free and <Ext href={REPO_URL}>open source</Ext>.
+            Audit it first if you want, then pick your system, paste the command and press Return:
+            {/* Above the command, not below it: the point of the audit is to read
+                the source BEFORE running anything. */}
+            <div className="mt-2 flex flex-col gap-1.5 rounded-lg border border-ink-800 bg-ink-950/60 p-2.5">
+              <span className="text-[10.5px] leading-relaxed text-ink-400">
+                Don’t take our word for it — paste this into whichever assistant you trust
+                (ChatGPT, Claude, Gemini) and have it read the source:
+              </span>
+              <CopyBlock text={AUDIT_PROMPT} label="Copy audit prompt" />
+            </div>
             <div
               ref={installRef}
               className="relative mt-2 flex flex-col gap-2 rounded-lg border border-ink-700 bg-ink-950 p-3"
@@ -95,28 +105,21 @@ export function LandingOnboardingGuide() {
               </span>
             </div>
           </Step>
-          <Step n={2} title="Audit it with your own AI" {...step(2)}>
-            Don’t take our word for it. Paste this into whichever assistant you trust — ChatGPT,
-            Claude, Gemini — and have it read the source before you hand anything real to it:
-            <div className="mt-2 rounded-lg border border-ink-700 bg-ink-950 p-3">
-              <CopyBlock text={AUDIT_PROMPT} label="Copy audit prompt" />
-            </div>
-          </Step>
-          <Step n={3} title="Fund Gate" {...step(3)}>
+          <Step n={2} title="Fund Gate" {...step(2)}>
             Sign up on <Ext href={GATE_SIGNUP_URL}>gate.com/signup</Ext>, deposit the capital
             you’ll deploy.
           </Step>
-          <Step n={4} title="Enable CrossEx" {...step(4)}>
+          <Step n={3} title="Enable CrossEx" {...step(3)}>
             Move funds into <Ext href={GATE_CROSSEX_URL}>CrossEx</Ext>, Gate’s cross-exchange
             margin account.
           </Step>
-          <Step n={5} title="Create your API key" {...step(5)}>
+          <Step n={4} title="Create your API key" {...step(4)}>
             In <Ext href={GATE_API_KEYS_URL}>API Management</Ext>, create an APIv4 key with CrossEx
             trade permission only; leave Withdrawal off. Paste it into the setup guide of your
             locally-running terminal at <Ext href={LOCAL_APP_URL}>localhost:6688</Ext> — keys stay
             on your machine and never touch this website.
           </Step>
-          <Step n={6} title="Execute" {...step(6)}>
+          <Step n={5} title="Execute" {...step(5)}>
             Hit Execute on any card; all four legs land pre-filled.
           </Step>
         </ol>

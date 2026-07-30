@@ -2,7 +2,7 @@
   CrossEx-Boros Terminal - Windows installer.
 
   Usage (paste into PowerShell):
-    irm https://raw.githubusercontent.com/mrenoon/boros-crossex-terminal/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/mrenoon/crossex-boros-terminal/main/install.ps1 | iex
 
   What this script does - and everything it does:
     1. Downloads a private copy of Node.js (official nodejs.org build, checksum
@@ -33,7 +33,7 @@ $ProgressPreference = 'SilentlyContinue'  # Invoke-WebRequest is far faster with
 # ---------------------------------------------------------------------------
 # Configuration (BOROS_* env vars exist for development/testing overrides)
 # ---------------------------------------------------------------------------
-$RepoSlug = if ($env:BOROS_REPO)   { $env:BOROS_REPO }   else { 'mrenoon/boros-crossex-terminal' }
+$RepoSlug = if ($env:BOROS_REPO)   { $env:BOROS_REPO }   else { 'mrenoon/crossex-boros-terminal' }
 $Branch   = if ($env:BOROS_BRANCH) { $env:BOROS_BRANCH } else { 'main' }
 $Port     = if ($env:BOROS_PORT)   { [int]$env:BOROS_PORT } else { 6688 }
 $Root     = if ($env:BOROS_ROOT)   { $env:BOROS_ROOT }   else { Join-Path $env:LOCALAPPDATA 'CrossEx-Boros' }
