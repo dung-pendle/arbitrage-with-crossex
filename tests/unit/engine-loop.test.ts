@@ -1,5 +1,5 @@
 /**
- * engine scenario tests: every lifecycle case from MAKER-HEDGE.md, with the
+ * engine scenario tests: every lifecycle case from docs/MAKER-HEDGE.md, with the
  * prime invariants asserted against VENUE truth after every tick.
  */
 import { describe, expect, it } from 'vitest';

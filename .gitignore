@@ -8,7 +8,7 @@ data/
 *.sqlite*
 # first-run disclaimer acceptance — written next to the .env, which in a source
 # checkout IS the repo root. Committing it would ship a pre-accepted disclaimer:
-# every clone would satisfy the gate without ever being shown DISCLAIMER.md.
+# every clone would satisfy the gate without ever being shown docs/DISCLAIMER.md.
 disclaimer.json
 # design scratch (not part of the shipped app)
 web/design/

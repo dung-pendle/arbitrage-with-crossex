@@ -1,7 +1,7 @@
 /**
  * LIVE SMOKE TEST — probes the Gate CrossEx venue behaviors the engine's
  * adapter (src/engine/venueGate.ts) depends on but the SDK/docs leave unverified
- * (MAKER-HEDGE.md §13/§17). It RECORDS verdicts rather than asserting venue
+ * (docs/MAKER-HEDGE.md §13/§17). It RECORDS verdicts rather than asserting venue
  * behavior: the whole point is that we do not know the answers yet. Run it once,
  * read the "SMOKE VERDICTS" block, adjust venueGate.ts accordingly.
  *

@@ -281,7 +281,7 @@ describe('user guide link', () => {
     const link = screen.getByRole('link', { name: 'User guide' });
     expect(link).toHaveAttribute(
       'href',
-      'https://github.com/mrenoon/boros-crossex-terminal/blob/main/USER_GUIDE.md',
+      'https://github.com/mrenoon/boros-crossex-terminal/blob/main/docs/USER_GUIDE.md',
     );
     expect(link).toHaveAttribute('target', '_blank');
   });

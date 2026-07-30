@@ -4,7 +4,7 @@
  * hand it to the store. This is the ONLY validation gate before the loop —
  * nothing here talks to venue-mutating endpoints.
  *
- * Deal shapes (MAKER-HEDGE.md): maker pair · taker pair · single open (maker or
+ * Deal shapes (docs/MAKER-HEDGE.md): maker pair · taker pair · single open (maker or
  * taker, b = null) · close (taker, reduce-only legs; close-pair = both legs).
  */
 import type { Symbol as RuleSymbol } from 'gate-api';

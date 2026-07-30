@@ -4,7 +4,7 @@
  * DEAL — converge leg A to a target, keeping leg B (when present) hedged to
  * A's fills.
  *
- * Design (MAKER-HEDGE.md): one SQLite file is the system of record (intent +
+ * Design (docs/MAKER-HEDGE.md): one SQLite file is the system of record (intent +
  * write-ahead order registry + observed facts); one single-writer reconcile
  * loop is the only code that mutates state or calls venue-mutating endpoints;
  * every derived quantity is a pure fold recomputed each tick.

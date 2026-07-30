@@ -2,7 +2,7 @@
 
 This is an experimental, open-source tool published by mrenoon, an independent developer, in a personal capacity, free of charge and on an **"as is"** basis. It is **not a Pendle product or service** and is not created, owned, operated, endorsed, maintained or supported by Pendle or Univerum Innovations Inc. It runs entirely on your own machine against **your own exchange accounts and API keys** — no one else holds your funds, keys or orders. It places **real orders with real funds** and can lose money. **Nothing here is financial, investment, legal or tax advice.**
 
-**➡️ Read the full [DISCLAIMER](./DISCLAIMER.md) before use. By using this software you accept it in full.**
+**➡️ Read the full [DISCLAIMER](./docs/DISCLAIMER.md) before use. By using this software you accept it in full.**
 
 Not available to, or intended for, any person where such use is unlawful (including restricted jurisdictions and sanctioned persons).
 
@@ -325,7 +325,7 @@ curl -s "https://api.gateio.ws/api/v4/crossex/rule/symbols" | jq '.[] | select(.
     USDT/USDC-quoted legs of one hedge read as one group.
   - `actions.ts` — the canonical action/basket contract + `resolveActions` (validation as
     structured violations; shared pair sizing; execute mode never re-sizes).
-  - `../engine/` — THE execution engine (see `MAKER-HEDGE.md`): every trade is a *deal* (maker+hedge
+  - `../engine/` — THE execution engine (see `docs/MAKER-HEDGE.md`): every trade is a *deal* (maker+hedge
     pair, both-market pair, single open, reduce-only close) converged by one single-writer
     reconcile loop over a SQLite system of record — write-ahead order reservations, deterministic
     client ids, three-way wire-outcome classification, freeze-while-in-doubt; recovery IS the

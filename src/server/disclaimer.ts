@@ -8,7 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { restrictToOwner } from './secretFile';
 
-/** Bump when DISCLAIMER.md changes materially. A stored acceptance of an older
+/** Bump when docs/DISCLAIMER.md changes materially. A stored acceptance of an older
  * version is treated as not-accepted, so the user is re-prompted. */
 export const DISCLAIMER_VERSION = '1';
 

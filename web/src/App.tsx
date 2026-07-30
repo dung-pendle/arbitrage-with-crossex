@@ -63,7 +63,7 @@ export default function App() {
   const headerControls = (
     <>
       <a
-        href="https://github.com/mrenoon/boros-crossex-terminal/blob/main/USER_GUIDE.md"
+        href="https://github.com/mrenoon/boros-crossex-terminal/blob/main/docs/USER_GUIDE.md"
         target="_blank"
         rel="noreferrer"
         title="How to read the Opportunities scan and open a pair well (opens on GitHub)"

@@ -62,7 +62,7 @@ export function ordersRoutes(deps: AppDeps) {
       // the second is the dangerous one:
       //
       //  1. The reconcile loop is the only writer of venue-mutating calls
-      //     (MAKER-HEDGE.md). A cancel from here happens outside the loop and
+      //     (docs/MAKER-HEDGE.md). A cancel from here happens outside the loop and
       //     outside the `orders` ledger, so cancel_requested is never set.
       //  2. Because cancel_requested stays 0, the venue reporting CANCELLED is
       //     decoded by decide() as "the user killed the maker on the exchange" =
