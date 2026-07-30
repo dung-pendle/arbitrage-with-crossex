@@ -72,12 +72,39 @@ export function ordersRoutes(deps: AppDeps) {
       //     two-leg entry, with no confirmation and no explanation.
       //
       // The deal's own Stop control does this properly, through the loop.
-      const owned = deps.engine?.store.findLiveOrderByVenueId(id);
-      if (owned) {
+      const store = deps.engine?.store;
+      const refuse = (o: { pairId: string }): never => {
         throw new CoreError(
-          `order ${id} belongs to deal ${owned.pairId} and is managed by the engine — use that deal's Stop control instead of cancelling it by hand`,
+          `order ${id} belongs to deal ${o.pairId} and is managed by the engine — use that deal's Stop control instead of cancelling it by hand`,
           'validation',
         );
+      };
+      // Matches EITHER identifier: the venue takes our client text on cancel
+      // too, so a venue-id-only guard is bypassable by anyone reading it off
+      // /api/deals or the venue's `text` on /api/orders/open.
+      const owned = store?.findLiveEngineOrder(id);
+      if (owned) refuse(owned);
+      // And the ledger can be blind: between a create whose outcome came back
+      // 'unknown' and the read that confirms it, the order may be LIVE on the
+      // venue while our row still has venue_order_id NULL. The engine cannot
+      // shrink that window — on an 'unknown' create the id does not exist
+      // client-side at all — so the guard has to cover it: ask the venue whose
+      // order this id is, and refuse if the answer is one of ours. An
+      // unreadable venue proves nothing, so that refuses too (fail closed);
+      // it is also the moment a hand cancel would have failed anyway.
+      if (store?.hasLiveOrderAwaitingVenueId()) {
+        let text: string;
+        try {
+          const { body } = await deps.getClients().crossEx.getCrossexOrder(id);
+          text = String((body as { text?: unknown })?.text ?? '');
+        } catch {
+          throw new CoreError(
+            `cannot cancel ${id} right now: a running deal has an order awaiting venue confirmation, and the venue could not confirm ${id} is not that order — retry shortly, or stop the deal with its Stop control`,
+            'validation',
+          );
+        }
+        const byText = text ? store.findLiveEngineOrder(text) : null;
+        if (byText) refuse(byText);
       }
       const { body } = await deps.getClients().crossEx.cancelCrossexOrder(id);
       deps.cache.bust('openOrders');

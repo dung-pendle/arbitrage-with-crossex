@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Store } from '../../src/engine/db';
 import { A_CONTRACT, B_CONTRACT, FakeVenue, VirtualClock, legSpec } from '../unit/engine-sim';
-import { HOST, makeTestApp, mockGateDelete, mockGateGet } from './helpers/gate-nock';
+import { gate, HOST, makeTestApp, mockGateDelete, mockGateGet, orderBody } from './helpers/gate-nock';
 
 describe('/api/orders', () => {
   let app: FastifyInstance;
@@ -106,6 +106,105 @@ describe('/api/orders', () => {
     expect(del.json().error.message).toMatch(/managed by the engine/);
     // Nothing reached the venue: no DELETE interceptor was registered at all.
     expect(store.listOrders('deal-000009')[0].cancelRequested).toBe(0);
+  });
+
+
+  /** The canonical live-maker fixture the guard cases below share. */
+  function seedPair(store: Store, clock: VirtualClock) {
+    store.createPair({
+      id: 'deal-000009',
+      mode: 'OPENING',
+      a: legSpec(A_CONTRACT, 'BUY'),
+      b: legSpec(B_CONTRACT, 'SELL'),
+      targetQty: '0.152',
+      limitPrice: '2500',
+      pricePolicy: 'fixed',
+      deadlineAt: null,
+      makerNotBefore: 0,
+      hedgeNotBefore: 0,
+      pocRejects: 0,
+      hedgeRejectStreak: 0,
+      maxClip: null,
+      clipBandBp: null,
+      haltReason: null,
+      reportJson: null,
+      createdAt: clock.now(),
+    });
+    return store.insertPendingOrder({
+      pairId: 'deal-000009',
+      leg: 'A',
+      kind: 'maker',
+      side: 'BUY',
+      qty: '0.152',
+      price: '2500',
+      tif: 'poc',
+      now: clock.now(),
+    });
+  }
+
+  // BYPASS (a): the venue accepts our CLIENT TEXT on cancel exactly as it
+  // accepts its own numeric id — venueGate.cancel depends on that — and the
+  // text is readable straight off /api/deals. A guard keyed on the venue id
+  // alone was one curl away from the permanent-STOP relinquish.
+  it('DELETE /orders/:clientId refuses too — the client text is not a back door', async () => {
+    const store = new Store(':memory:');
+    const clock = new VirtualClock();
+    app = makeTestApp({ engine: { store, venue: new FakeVenue(), clock } });
+    const o = seedPair(store, clock);
+    store.updateOrder(o.pairId, o.leg, o.seq, { state: 'OPEN', venueOrderId: '900001' });
+
+    const del = await app.inject({
+      method: 'DELETE',
+      url: `/api/orders/${o.clientId}`,
+      headers: HOST,
+    });
+    expect(del.statusCode).toBe(400);
+    expect(del.json().error.message).toMatch(/managed by the engine/);
+    // No DELETE interceptor is registered — a leak would fail the request loudly.
+    expect(store.listOrders('deal-000009')[0].cancelRequested).toBe(0);
+  });
+
+  // BYPASS (b): between a create that came back 'unknown' and the read that
+  // confirms it, the order can be LIVE on the venue while our row still has
+  // venue_order_id NULL — and the pair is frozen, which is exactly when a user
+  // reaches for Cancel. The ledger can't disprove ownership, so the guard asks
+  // the venue whose order it is.
+  it('refuses a venue-id cancel that the venue says is ours, while our row awaits confirmation', async () => {
+    const store = new Store(':memory:');
+    const clock = new VirtualClock();
+    app = makeTestApp({ engine: { store, venue: new FakeVenue(), clock } });
+    const o = seedPair(store, clock); // stays PENDING, venueOrderId NULL
+    mockGateGet('/orders/900001', { body: orderBody({ order_id: '900001', text: o.clientId }) });
+
+    const del = await app.inject({ method: 'DELETE', url: '/api/orders/900001', headers: HOST });
+    expect(del.statusCode).toBe(400);
+    expect(del.json().error.message).toMatch(/managed by the engine/);
+  });
+
+  it('still cancels a genuinely hand-placed order during that same window', async () => {
+    // The guard must not become a blanket denial: the deal is in doubt, but
+    // this order is demonstrably not ours, so the user keeps control of it.
+    const store = new Store(':memory:');
+    const clock = new VirtualClock();
+    app = makeTestApp({ engine: { store, venue: new FakeVenue(), clock } });
+    seedPair(store, clock);
+    mockGateGet('/orders/777777', { body: orderBody({ order_id: '777777', text: 'apiv4-web' }) });
+    mockGateDelete('/orders/777777', { body: { order_id: '777777', status: 'success' } });
+
+    const del = await app.inject({ method: 'DELETE', url: '/api/orders/777777', headers: HOST });
+    expect(del.statusCode).toBe(200);
+  });
+
+  it('refuses when the venue cannot say whose order it is (proves nothing → fail closed)', async () => {
+    const store = new Store(':memory:');
+    const clock = new VirtualClock();
+    app = makeTestApp({ engine: { store, venue: new FakeVenue(), clock } });
+    seedPair(store, clock);
+    gate().get(/\/orders\/900001/).reply(502, { label: 'SERVER_ERROR' });
+
+    const del = await app.inject({ method: 'DELETE', url: '/api/orders/900001', headers: HOST });
+    expect(del.statusCode).toBe(400);
+    expect(del.json().error.message).toMatch(/could not confirm/);
   });
 
   it('DELETE /orders/:id still cancels a hand-placed order while a deal is running', async () => {

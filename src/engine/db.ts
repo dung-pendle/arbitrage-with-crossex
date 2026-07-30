@@ -374,13 +374,36 @@ export class Store {
     ).map(toOrder);
   }
 
-  /** Find a LIVE engine-owned order by the venue's own order id. Used by the
-   * route layer to refuse hand-cancelling an order the reconcile loop owns. */
-  findLiveOrderByVenueId(venueOrderId: string): OrderRow | null {
+  /** Find a LIVE engine-owned order by EITHER identifier a caller might hold.
+   * The venue accepts our client TEXT on cancel just as it accepts its own
+   * numeric id — venueGate.cancel relies on exactly that — so a guard keyed on
+   * the venue id alone is bypassable by anyone holding the client text (it
+   * rides in /api/deals and in the venue's `text` field on /api/orders/open).
+   * NOCASE on the text: if the venue matches it case-insensitively, a
+   * case-mangled id must not slip past a BINARY comparison. */
+  findLiveEngineOrder(id: string): OrderRow | null {
     const r = this.db
-      .prepare(`SELECT * FROM orders WHERE venue_order_id = ? AND state IN ('PENDING','OPEN') LIMIT 1`)
-      .get(venueOrderId) as unknown as OrderDbRow | undefined;
+      .prepare(
+        `SELECT * FROM orders
+         WHERE (venue_order_id = ? OR client_id = ? COLLATE NOCASE)
+           AND state IN ('PENDING','OPEN') LIMIT 1`,
+      )
+      .get(id, id) as unknown as OrderDbRow | undefined;
     return r ? toOrder(r) : null;
+  }
+
+  /** True while some live engine order's venue id is still unknown to the
+   * ledger (its create returned 'unknown', or the confirming read is still
+   * owed). In that window the ledger alone cannot disprove that a venue id
+   * handed to us belongs to the engine. */
+  hasLiveOrderAwaitingVenueId(): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM orders WHERE venue_order_id IS NULL AND state IN ('PENDING','OPEN') LIMIT 1`,
+        )
+        .get() !== undefined
+    );
   }
 
   updateOrder(pairId: string, leg: OrderRow['leg'], seq: number, patch: OrderPatch): void {
