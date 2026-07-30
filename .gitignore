@@ -22,3 +22,6 @@ tests/fixtures/gate/recorded/
 web/dist/
 # local tooling state
 .claude/
+
+# Local-only tooling.
+deploy/
