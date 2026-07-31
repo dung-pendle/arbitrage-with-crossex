@@ -611,3 +611,34 @@ describe('PairTicket prefill — stale symbol-rules cache', () => {
     expect(allSymbols.filter((sym) => sym.includes('BTC'))).toHaveLength(0);
   });
 });
+
+describe('notional validation', () => {
+  // Reported live: someone pasted a spreadsheet-formatted "7,668.31" and the
+  // ticket went silently dead — Number() gives NaN, so the actions were nulled
+  // and Execute just never armed, with nothing on screen saying why.
+  it('says what is wrong when a formatted number is pasted', async () => {
+    renderWithClient(<PairTicket />);
+    await userEvent.click(await screen.findByRole('button', { name: 'ETH' }));
+
+    const notional = screen.getByLabelText('Notional per leg (USDT)');
+    await userEvent.type(notional, '7,668.31');
+
+    const err = await screen.findByRole('alert');
+    expect(err).toHaveTextContent('Remove the commas — type 7668.31');
+    expect(notional).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('clears once the value is usable', async () => {
+    renderWithClient(<PairTicket />);
+    await userEvent.click(await screen.findByRole('button', { name: 'ETH' }));
+
+    const notional = screen.getByLabelText('Notional per leg (USDT)');
+    await userEvent.type(notional, '7,668.31');
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+
+    await userEvent.clear(notional);
+    await userEvent.type(notional, '7668.31');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(notional).not.toHaveAttribute('aria-invalid');
+  });
+});

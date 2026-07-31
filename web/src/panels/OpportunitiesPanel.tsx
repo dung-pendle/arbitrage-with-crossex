@@ -12,8 +12,11 @@
  * hold-to-confirm control.
  */
 import { useEffect, useId, useState, type MouseEvent, type ReactNode } from 'react';
+import { amountError } from '../lib/amount';
 import {
   isValidOpportunityNotional,
+  OPPORTUNITY_NOTIONAL_MAX,
+  OPPORTUNITY_NOTIONAL_MIN,
   OPPORTUNITY_FEE_TIERS,
   useOpportunities,
   type OpportunityFeeTier,
@@ -696,6 +699,13 @@ export function OpportunitiesPanel({ unconfigured = false }: { unconfigured?: bo
   }, [debouncedSize]);
 
   const notionalUsd = notionalChoice === 'custom' ? size : NOTIONAL_PRESETS[notionalChoice];
+  const sizeErr =
+    notionalChoice === 'custom'
+      ? amountError(sizeStr, {
+          min: OPPORTUNITY_NOTIONAL_MIN,
+          max: OPPORTUNITY_NOTIONAL_MAX,
+        })
+      : null;
   const sizeBad = notionalChoice === 'custom' && !isValidOpportunityNotional(Number(sizeStr));
 
   // Configured accounts price from their own live fee schedule; the simulated
@@ -794,7 +804,9 @@ export function OpportunitiesPanel({ unconfigured = false }: { unconfigured?: bo
                 }`}
               />
             )}
-            <span className="text-[10.5px] text-ink-400">$1k – $100M — re-prices every card</span>
+            <span className={`text-[10.5px] ${sizeErr ? 'text-rose-300' : 'text-ink-400'}`} role={sizeErr ? 'alert' : undefined}>
+              {sizeErr ?? '$1k – $100M — re-prices every card'}
+            </span>
           </div>
 
           {unconfigured && (

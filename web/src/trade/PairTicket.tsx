@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSymbolDetail, useSymbolsByBase } from '../api/queries';
 import type { ActionInput, PreviewResult, RestEstimate } from '../api/types';
 import { SegmentedToggle } from '../components/SegmentedToggle';
+import { amountError } from '../lib/amount';
 import { fmtUsd } from '../lib/fmt';
 import { uuid } from '../lib/uuid';
 import { ExecuteControl } from './ExecuteControl';
@@ -111,6 +112,7 @@ export function PairTicket() {
   );
 
   const notionalNum = Number(notionalStr);
+  const notionalErr = amountError(notionalStr);
   const notionalOk = Number.isFinite(notionalNum) && notionalNum > 0;
   // Leverage is PER LEG at each venue's own max. The caps differ (e.g. HL 5x vs
   // Bybit 20x), margin is shared cross-collateral, and a delta-neutral pair's
@@ -272,12 +274,19 @@ export function PairTicket() {
         </label>
         <input
           id="pair-notional"
-          className="input num"
+          className={`input num ${notionalErr ? '!border-rose-500/60' : ''}`}
           inputMode="decimal"
           placeholder="notional per leg"
+          aria-invalid={notionalErr ? true : undefined}
+          aria-describedby={notionalErr ? 'pair-notional-error' : undefined}
           value={notionalStr}
           onChange={(e) => setNotionalStr(e.target.value)}
         />
+        {notionalErr && (
+          <p id="pair-notional-error" role="alert" className="text-[11px] text-rose-300">
+            {notionalErr}
+          </p>
+        )}
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-ink-400">

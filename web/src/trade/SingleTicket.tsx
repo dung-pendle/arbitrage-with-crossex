@@ -9,6 +9,7 @@ import { useSymbolDetail } from '../api/queries';
 import type { ActionInput, Side } from '../api/types';
 import { SegmentedToggle } from '../components/SegmentedToggle';
 import { fmtUsd, parseSymbol, sig } from '../lib/fmt';
+import { amountError } from '../lib/amount';
 import { formatRestPrice } from '../lib/ticks';
 import { ExecuteControl } from './ExecuteControl';
 import { feeText, PreviewFallback, SlippageBadge, ViolationList } from './previewBits';
@@ -60,6 +61,7 @@ export function SingleTicket() {
 
   const base = symbol ? parseSymbol(symbol).base : '';
   const sizeNum = Number(sizeStr);
+  const sizeErr = amountError(sizeStr);
   const sizeOk = Number.isFinite(sizeNum) && sizeNum > 0;
   const levMax = detail.data?.leverageMax ?? 0;
   const priceNum = Number(priceStr);
@@ -167,12 +169,19 @@ export function SingleTicket() {
         </div>
         <input
           id="ticket-size"
-          className="input num"
+          className={`input num ${sizeErr ? '!border-rose-500/60' : ''}`}
           inputMode="decimal"
           placeholder={sizeMode === 'usdt' ? 'notional (USDT)' : `qty${base ? ` (${base})` : ''}`}
+          aria-invalid={sizeErr ? true : undefined}
+          aria-describedby={sizeErr ? 'ticket-size-error' : undefined}
           value={sizeStr}
           onChange={(e) => setSizeStr(e.target.value)}
         />
+        {sizeErr && (
+          <p id="ticket-size-error" role="alert" className="text-[11px] text-rose-300">
+            {sizeErr}
+          </p>
+        )}
         {p && ref !== undefined && sizeOk && (
           <div className="text-[11px] text-ink-400">
             {sizeMode === 'usdt' ? (
