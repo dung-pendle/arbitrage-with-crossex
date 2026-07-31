@@ -661,17 +661,17 @@ export function StrategyCard({
           <SegmentedToggle<EntryCostMode>
             ariaLabel="Perp entry cost"
             value={entryMode}
-            onChange={setEntryMode}
+            onChange={(next) => {
+              // The Include segment doubles as the disclosure header: clicking
+              // it when it is ALREADY the choice opens/closes the itemisation
+              // (a segmented control fires onChange on every click, not just on
+              // a change). Arriving from Omit always opens it — you have just
+              // chosen to charge the entry cost, so show what that consists of.
+              if (next === 'include') setPartsOpen((open) => (entryMode === 'include' ? !open : true));
+              setEntryMode(next);
+            }}
             options={[
-              {
-                value: 'include',
-                // The count is the whole point of the disclosure: a card with
-                // executions dropped must not look like an untouched one.
-                label:
-                  entryParts.length > 0
-                    ? `Include (${chargedPartCount} of ${entryParts.length})`
-                    : 'Include',
-              },
+              { value: 'include', label: 'Include' },
               { value: 'omit', label: 'Omit (rolled over)' },
             ]}
           />
@@ -681,11 +681,14 @@ export function StrategyCard({
               aria-expanded={partsOpen}
               aria-controls={partsId}
               aria-label="Itemise the perp entry cost"
-              title="Itemise it — tick only the executions that belong to this position"
+              title="Itemise the perp entry cost — tick only the executions that belong to this position"
               onClick={() => setPartsOpen((v) => !v)}
-              className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[10px] text-ink-400 transition-colors hover:border-ink-500 hover:text-ink-200"
+              className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[11px] font-medium text-cyan-300 transition-colors hover:border-cyan-400 hover:bg-cyan-500/20 hover:text-cyan-200"
             >
-              {partsOpen ? '▴' : '▾'}
+              {/* The count carries the state a collapsed card would otherwise
+                  hide: one with executions dropped must not look untouched. */}
+              {entryParts.length > 0 ? `${chargedPartCount} of ${entryParts.length}` : 'itemise'}{' '}
+              <span aria-hidden="true">{partsOpen ? '▴' : '▾'}</span>
             </button>
           )}
         </span>

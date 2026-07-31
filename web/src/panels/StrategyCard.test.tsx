@@ -678,10 +678,11 @@ describe('StrategyCard — perp entry cost', () => {
  * (deal-a $30.00, deal-b $19.16) plus one fee row per live leg ($20.55 Bybit,
  * $44.46 Hyperliquid) — 4 parts totalling the 65.01 + 49.16 aggregates. */
 describe('StrategyCard — itemised entry cost', () => {
-  const itemise = () =>
-    fireEvent.click(screen.getByRole('button', { name: 'Itemise the perp entry cost' }));
+  const itemise = () => fireEvent.click(itemiseBtn());
   const entryGroup = () => screen.getByRole('radiogroup', { name: 'Perp entry cost' });
-  const includeRadio = (name: string) => within(entryGroup()).getByRole('radio', { name });
+  const includeRadio = () => within(entryGroup()).getByRole('radio', { name: 'Include' });
+  /** The disclosure — its label carries the "n of N charged" count. */
+  const itemiseBtn = () => screen.getByRole('button', { name: 'Itemise the perp entry cost' });
 
   /** Two executions can carry identical prose, so address a row by its part id
    * — the same identity the ticks are persisted under. */
@@ -690,7 +691,7 @@ describe('StrategyCard — itemised entry cost', () => {
 
   it('counts what is charged, and lists every execution with its date', () => {
     render(card());
-    expect(includeRadio('Include (4 of 4)')).toBeInTheDocument();
+    expect(itemiseBtn()).toHaveTextContent('4 of 4');
     itemise();
     const boxes = screen.getAllByRole('checkbox');
     expect(boxes).toHaveLength(4);
@@ -708,7 +709,7 @@ describe('StrategyCard — itemised entry cost', () => {
     fireEvent.click(rowFor(container, 'slip:deal:deal-a'));
     // deal-a cost $30.00 → 282.21 + 30 = 312.21.
     expect(screen.getAllByText('+$312').length).toBeGreaterThan(0);
-    expect(includeRadio('Include (3 of 4)')).toBeInTheDocument();
+    expect(itemiseBtn()).toHaveTextContent('3 of 4');
     // Current PnL moves with it: −114.91 + 30 = −84.91.
     expect(screen.getByText('-$85')).toBeInTheDocument();
   });
@@ -737,13 +738,32 @@ describe('StrategyCard — itemised entry cost', () => {
     const first = render(card());
     itemise();
     fireEvent.click(rowFor(first.container, 'slip:deal:deal-a'));
-    expect(includeRadio('Include (3 of 4)')).toBeInTheDocument();
+    expect(itemiseBtn()).toHaveTextContent('3 of 4');
     first.unmount();
 
     render(card());
-    expect(includeRadio('Include (3 of 4)')).toBeInTheDocument();
+    expect(itemiseBtn()).toHaveTextContent('3 of 4');
     itemise();
     expect(screen.getAllByRole('checkbox').filter((b) => (b as HTMLInputElement).checked)).toHaveLength(3);
+  });
+
+  it('clicking the Include segment itself opens and closes the itemisation', () => {
+    render(card());
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    // Already the selected option, so the click cannot be a "change" — it is
+    // the disclosure header.
+    fireEvent.click(includeRadio());
+    expect(screen.getAllByRole('checkbox')).toHaveLength(4);
+    expect(itemiseBtn()).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(includeRadio());
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('coming back from Omit opens it — you just chose to charge the entry cost', () => {
+    render(card());
+    omitEntry();
+    fireEvent.click(includeRadio());
+    expect(screen.getAllByRole('checkbox')).toHaveLength(4);
   });
 
   it('hides the itemisation under Omit — there is nothing left to pick', () => {
@@ -759,9 +779,8 @@ describe('StrategyCard — itemised entry cost', () => {
 
   it('says so plainly when a position could not be itemised', () => {
     render(card({ perpEntryCostParts: [] }));
-    // No count to show, and the master switch is the only control left.
-    expect(includeRadio('Include')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Itemise the perp entry cost' }));
+    expect(itemiseBtn()).toHaveTextContent('itemise'); // no count to show
+    itemise();
     expect(screen.getByText(/couldn't be itemised/)).toBeInTheDocument();
   });
 });
