@@ -106,6 +106,11 @@ export function ExecuteControl({
   // leave the original intent's now-executed id in the pending store, where a
   // later identical ticket would recover it and be deduped into the OLD deal.
   const inflightIntentRef = useRef('');
+  // A SINGLE resting limit order is a plain order, not a process to supervise:
+  // no hedge leg, no deadline, nothing to babysit. It should not drag the user
+  // into the deal view — it belongs in Open Orders like any other limit order.
+  const restingOnlyRef = useRef(false);
+  const [placedResting, setPlacedResting] = useState(false);
 
   // Lazy previews only run while the card is shown; eager previews run always so
   // the button is armed the moment the ticket is complete.
@@ -126,7 +131,8 @@ export function ExecuteControl({
       // and wiping those would re-open their double-execute window.
       clearPendingBasket(inflightIntentRef.current);
       onExecuted?.();
-      flow.openDeal(r.id);
+      if (restingOnlyRef.current) setPlacedResting(true);
+      else flow.openDeal(r.id);
     },
     // onError deliberately KEEPS basketIdRef so a retry of the SAME order reuses
     // the id (the server dedupes on it; a network-lost POST must never double-execute).
@@ -148,6 +154,7 @@ export function ExecuteControl({
     // edited ticket still mints a fresh one; null whenever there is nothing
     // pending, which is the previous behaviour.
     basketIdRef.current = readPendingBasket(resetKey);
+    setPlacedResting(false); // a new intent supersedes the last confirmation
   }, [resetKey]);
 
   // Every deal shape needs the CURRENT preview at confirm (closes get side/qty
@@ -188,6 +195,9 @@ export function ExecuteControl({
     const base = finalizeActions(previews);
     const deal = dealFromActions(basketIdRef.current, decorate ? decorate(base) : base, previews);
     if (!deal) return; // unmappable shape — the button was disabled anyway
+    // `b` is OMITTED for a single leg, not set to null — hence ?? null.
+    restingOnlyRef.current = (deal.b ?? null) === null && deal.execution === 'maker';
+    setPlacedResting(false);
     execute.mutate(deal);
   };
 
@@ -215,6 +225,11 @@ export function ExecuteControl({
           label
         )}
       </HoldToConfirmButton>
+      {placedResting && (
+        <div role="status" className="mt-1 text-[11px] text-emerald-400">
+          Limit order placed — it rests until filled. See Open Orders.
+        </div>
+      )}
       {marginBlocked && (
         <div role="alert" className="mt-1 text-[11px] text-rose-400">
           margin ≈ {fmtUsd(margin.required)} exceeds available {Number.isFinite(available) ? fmtUsd(available) : '—'}

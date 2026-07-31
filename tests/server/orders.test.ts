@@ -207,6 +207,72 @@ describe('/api/orders', () => {
     expect(del.json().error.message).toMatch(/could not confirm/);
   });
 
+
+  // A single resting limit order has no hedge leg to strand, and "give up the
+  // rest" is exactly what cancelling a limit order means. Refusing it was the
+  // bug: the user places a plain order, sees it in this table, and cannot
+  // cancel it from here. The route now translates the hand-cancel into the
+  // deal's own Stop so the LOOP does the venue call (single-writer holds).
+  it('DELETE /orders/:id stops the deal for a single resting limit order', async () => {
+    const store = new Store(':memory:');
+    const clock = new VirtualClock();
+    app = makeTestApp({ engine: { store, venue: new FakeVenue(), clock } });
+
+    store.createPair({
+      id: 'deal-plain-1',
+      mode: 'OPENING',
+      a: legSpec(A_CONTRACT, 'BUY'),
+      b: null, // single leg — this is what makes it a plain order
+      targetQty: '0.152',
+      limitPrice: '2500',
+      pricePolicy: 'fixed',
+      deadlineAt: null,
+      makerNotBefore: 0,
+      hedgeNotBefore: 0,
+      pocRejects: 0,
+      hedgeRejectStreak: 0,
+      maxClip: null,
+      clipBandBp: null,
+      haltReason: null,
+      reportJson: null,
+      createdAt: clock.now(),
+    });
+    const o = store.insertPendingOrder({
+      pairId: 'deal-plain-1',
+      leg: 'A',
+      kind: 'maker',
+      side: 'BUY',
+      qty: '0.152',
+      price: '2500',
+      tif: 'poc',
+      now: clock.now(),
+    });
+    store.updateOrder(o.pairId, o.leg, o.seq, { state: 'OPEN', venueOrderId: '910001' });
+
+    const del = await app.inject({ method: 'DELETE', url: '/api/orders/910001', headers: HOST });
+
+    expect(del.statusCode).toBe(200);
+    expect(del.json().data).toMatchObject({ dealId: 'deal-plain-1', cancelling: true });
+    // The deal is stopping; the LOOP cancels on the venue, not this route —
+    // no DELETE interceptor is registered, so a direct wire call would fail.
+    expect(store.getPair('deal-plain-1')!.mode).toBe('STOPPING');
+  });
+
+  // The exception is exactly that: single-leg AND resting. A hedged pair must
+  // still refuse, or one click abandons a half-filled two-leg entry.
+  it('still refuses when the same order belongs to a hedged pair', async () => {
+    const store = new Store(':memory:');
+    const clock = new VirtualClock();
+    app = makeTestApp({ engine: { store, venue: new FakeVenue(), clock } });
+    const o = seedPair(store, clock); // has a b leg
+    store.updateOrder(o.pairId, o.leg, o.seq, { state: 'OPEN', venueOrderId: '910002' });
+
+    const del = await app.inject({ method: 'DELETE', url: '/api/orders/910002', headers: HOST });
+    expect(del.statusCode).toBe(400);
+    expect(del.json().error.message).toMatch(/managed by the engine/);
+    expect(store.getPair('deal-000009')!.mode).toBe('OPENING'); // untouched
+  });
+
   it('DELETE /orders/:id still cancels a hand-placed order while a deal is running', async () => {
     const store = new Store(':memory:');
     app = makeTestApp({ engine: { store, venue: new FakeVenue(), clock: new VirtualClock() } });

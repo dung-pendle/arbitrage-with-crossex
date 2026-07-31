@@ -14,7 +14,13 @@ export function RecoveryBanner() {
   const alerts = useAlerts();
   const ack = useAckAlert();
 
-  const deals = active.data ?? [];
+  // A single resting limit order (no hedge leg, no deadline) is a plain order,
+  // not a deal in flight — it lives in Open Orders and needs no supervision.
+  // Nagging about it here is what made placing one feel like starting a process.
+  // Anything that has actually gone wrong still surfaces through `standing`.
+  const deals = (active.data ?? []).filter(
+    (d) => !(d.pair.b === null && d.pair.limitPrice !== null && d.pair.mode === 'OPENING'),
+  );
   const standing = alerts.data ?? [];
 
   if (!flow.modalOpen && deals.length > 0) {

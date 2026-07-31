@@ -416,3 +416,64 @@ describe('ExecuteControl', () => {
     });
   });
 });
+
+describe('a single resting limit order is a plain order', () => {
+  /** One open-limit leg: no hedge, no deadline — it just rests. */
+  const limitAction: ActionInput = {
+    kind: 'open-limit',
+    symbol: 'GATE_FUTURE_ETH_USDT',
+    side: 'BUY',
+    qty: '1',
+    price: '2400',
+    tif: 'POC',
+  };
+
+  it('confirms inline instead of dragging the user into the deal view', async () => {
+    const calls: DealRequest[] = [];
+    server.use(
+      ...baseHandlers(),
+      echoPreviewHandler({ overrides: { price: '2400', type: 'LIMIT', tif: 'POC' } }),
+      dealHandler(calls),
+    );
+    renderWithClient(
+      <ExecuteControl scope="limit" actions={[limitAction]} label="Go" holdMs={50} intentKey="limit|1" />,
+    );
+
+    const go = () => screen.getByRole('button', { name: 'Go' });
+    await waitFor(() => expect(go()).toBeEnabled());
+    fireEvent.pointerDown(go());
+
+    // It really was sent as a single resting maker deal...
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].b ?? null).toBeNull();
+    expect(calls[0].execution).toBe('maker');
+
+    // ...and the answer is a confirmation, not a deal modal.
+    expect(await screen.findByText(/Limit order placed/)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a hedged pair still opens the deal view', async () => {
+    const calls: DealRequest[] = [];
+    server.use(
+      ...baseHandlers(),
+      echoPreviewHandler({ overrides: { qty: '1' } }),
+      dealHandler(calls),
+    );
+    const pair: ActionInput[] = [
+      { kind: 'open-market', symbol: 'GATE_FUTURE_ETH_USDT', side: 'BUY', qty: '1' },
+      { kind: 'open-market', symbol: 'BINANCE_FUTURE_ETH_USDT', side: 'SELL', qty: '1' },
+    ];
+    renderWithClient(
+      <ExecuteControl scope="pair2" actions={pair} label="Go" holdMs={50} intentKey="pair|1" />,
+    );
+    const go = () => screen.getByRole('button', { name: 'Go' });
+    await waitFor(() => expect(go()).toBeEnabled());
+    fireEvent.pointerDown(go());
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].b).not.toBeNull();
+    // No "placed" confirmation for a real deal — that one is supervised.
+    await waitFor(() => expect(screen.queryByText(/Limit order placed/)).toBeNull());
+  });
+});

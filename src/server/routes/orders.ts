@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { CoreError } from '../../core/errors';
+import { commands } from '../../engine/loop';
 import type { AppDeps } from '../app';
 import { TTL } from '../cache';
 
@@ -72,18 +73,40 @@ export function ordersRoutes(deps: AppDeps) {
       //     two-leg entry, with no confirmation and no explanation.
       //
       // The deal's own Stop control does this properly, through the loop.
+      //
+      // ONE exception, added because the refusal was itself the bug for it: a
+      // SINGLE resting limit order (no hedge leg) is a plain order in the
+      // user's head — they placed it, they see it in this table, they cancel it
+      // here. There is no second leg to strand, and "relinquish the rest" is
+      // exactly what cancelling a limit order means. So instead of refusing, we
+      // translate the hand-cancel into the deal's own Stop and let the loop do
+      // the venue call — the single-writer rule holds, cancel_requested gets
+      // set, and the deal finishes honestly with whatever had filled.
       const store = deps.engine?.store;
+      /** A single-leg resting maker: no hedge to strand, so a hand cancel is safe. */
+      const isPlainRestingOrder = (pairId: string): boolean => {
+        const pair = store?.getPair(pairId);
+        return !!pair && pair.b === null && pair.limitPrice !== null;
+      };
       const refuse = (o: { pairId: string }): never => {
         throw new CoreError(
           `order ${id} belongs to deal ${o.pairId} and is managed by the engine — use that deal's Stop control instead of cancelling it by hand`,
           'validation',
         );
       };
+      /** Refuse, UNLESS it is a plain resting order — then stop that deal. */
+      const refuseOrStop = (o: { pairId: string }) => {
+        if (!isPlainRestingOrder(o.pairId)) refuse(o);
+        commands.stop(deps.engine!.store, o.pairId);
+        deps.engine!.wake?.();
+        deps.cache.bust('openOrders');
+        return reply.ok({ id, dealId: o.pairId, cancelling: true });
+      };
       // Matches EITHER identifier: the venue takes our client text on cancel
       // too, so a venue-id-only guard is bypassable by anyone reading it off
       // /api/deals or the venue's `text` on /api/orders/open.
       const owned = store?.findLiveEngineOrder(id);
-      if (owned) refuse(owned);
+      if (owned) return refuseOrStop(owned);
       // And the ledger can be blind: between a create whose outcome came back
       // 'unknown' and the read that confirms it, the order may be LIVE on the
       // venue while our row still has venue_order_id NULL. The engine cannot
@@ -104,7 +127,7 @@ export function ordersRoutes(deps: AppDeps) {
           );
         }
         const byText = text ? store.findLiveEngineOrder(text) : null;
-        if (byText) refuse(byText);
+        if (byText) return refuseOrStop(byText);
       }
       const { body } = await deps.getClients().crossEx.cancelCrossexOrder(id);
       deps.cache.bust('openOrders');
