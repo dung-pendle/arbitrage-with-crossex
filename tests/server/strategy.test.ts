@@ -199,6 +199,23 @@ describe('GET /api/strategy/:address', () => {
     expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeCloseTo(2 * ENTRY_SLIPPAGE, 6);
     expect(s.feesUsd.future.perpExitSlippageUsd).toBeCloseTo(2 * ENTRY_SLIPPAGE, 6);
     expect(s.warnings.join(' ')).toMatch(/summed from 2 deals in this terminal's journal/);
+
+    // …and each of those executions arrives itemised, keyed by the journal row
+    // it came from, so the Positions box can charge or drop them one by one.
+    const slip = s.perpEntryCostParts.filter((p: { kind: string }) => p.kind === 'slippage');
+    expect(slip.map((p: { id: string }) => p.id)).toEqual([
+      'slip:deal:original',
+      'slip:deal:migration',
+    ]);
+    expect(slip.every((p: { usd: number }) => Math.abs(p.usd - ENTRY_SLIPPAGE) < 1e-6)).toBe(true);
+    // Fees are per LIVE leg (Gate's cumulative position fee) — never per deal.
+    const fees = s.perpEntryCostParts.filter((p: { kind: string }) => p.kind === 'fees');
+    expect(fees).toHaveLength(2);
+    expect(fees.every((p: { atSec: number | null }) => p.atSec === null)).toBe(true);
+    // The invariant the client's add-back depends on.
+    expect(
+      s.perpEntryCostParts.reduce((a: number, p: { usd: number }) => a + p.usd, 0),
+    ).toBeCloseTo(s.feesUsd.paid.perpTradingUsd + s.feesUsd.paid.perpEntrySlippageUsd, 6);
   });
 
   it('reports null exit fees when the fee schedule is unavailable (never a guess)', async () => {

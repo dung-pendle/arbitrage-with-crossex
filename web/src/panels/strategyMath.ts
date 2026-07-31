@@ -3,6 +3,8 @@
  * (each part folds in via its own toggle), and it always bakes the perp ENTRY
  * parts in, which the "rolled over" toggle backs out again. */
 
+import type { PerpEntryCostPart } from '../api/types';
+
 export const SECONDS_IN_YEAR = 365 * 24 * 3600;
 
 /** The per-position cost assumptions. Entry and exit are INDEPENDENT: the
@@ -12,20 +14,29 @@ export const SECONDS_IN_YEAR = 365 * 24 * 3600;
 export interface CostFlags {
   inclExitFees: boolean;
   inclExitSlippage: boolean;
-  /** False = this strategy is NOT charged the perp entry fees + entry slippage.
-   * Gate reports a position's fee CUMULATIVELY and its entryPrice from the
-   * original open, so for a perp rolled into a new maturity both predate the
-   * strategy — charging them here bills it for a previous life's spending. */
+  /** The master switch. False = this strategy is NOT charged the perp entry
+   * fees + entry slippage at all. Gate reports a position's fee CUMULATIVELY
+   * and its entryPrice from the original open, so for a perp rolled into a new
+   * maturity both predate the strategy — charging them here bills it for a
+   * previous life's spending. */
   inclEntryCost: boolean;
+  /** Ids of individual entry-cost parts to leave out while inclEntryCost is
+   * true — for a book built across several executions, the ones that belong to
+   * an earlier strategy. Empty/absent = charge everything (the default). */
+  excludedEntryPartIds?: ReadonlySet<string>;
 }
 
 export interface CostsApplied {
   /** The exit cost actually folded in (0 when both off / unknown / no perps).
    * Can be NEGATIVE when the assumed exit slippage is favorable. */
   exitUsd: number;
-  /** The entry cost handed BACK (0 while included). Signed — a favorable
-   * (negative) entry slippage hands back negatively. */
+  /** The entry cost handed BACK (0 while everything is charged). Signed — a
+   * favorable (negative) entry slippage hands back negatively. */
   entryAddBackUsd: number;
+  /** The same split by kind: ProfitBars nets each against its own bar, so the
+   * charts shrink with the ticks instead of vanishing all at once. */
+  entryAddBackFeesUsd: number;
+  entryAddBackSlippageUsd: number;
   /** Current PnL under the ENTRY assumption only. The exit parts are future
    * costs — money not yet spent — so they never move the "now" line, only the
    * by-maturity target. */
@@ -51,6 +62,9 @@ export function applyCostFlags(opts: {
   perpEntryFeesUsd: number;
   /** feesUsd.paid.perpEntrySlippageUsd — signed; null = unknown. */
   perpEntrySlippageUsd: number | null;
+  /** The itemised entry cost. Empty is fine — the master switch still works
+   * off the aggregates, so an older payload degrades to all-or-nothing. */
+  perpEntryParts?: readonly PerpEntryCostPart[];
   realizedPnlUsd: number;
   realizedApr: number | null;
   expectedPnlToMaturityUsd: number | null;
@@ -70,11 +84,37 @@ export function applyCostFlags(opts: {
   const exitUsd = feesPart + slipPart;
   // Both parts are ALREADY subtracted server-side — inside realizedPnlUsd (via
   // each leg's net) and inside expectedPnlToMaturityUsd (via paid.totalUsd) —
-  // so omitting means adding them back. Unknown slippage counts as 0, exactly
-  // as the server counts it when summing.
-  const entryAddBackUsd = opts.flags.inclEntryCost
-    ? 0
-    : opts.perpEntryFeesUsd + (opts.perpEntrySlippageUsd ?? 0);
+  // so leaving one out means adding it back. Unknown slippage counts as 0,
+  // exactly as the server counts it when summing.
+  const parts = opts.perpEntryParts ?? [];
+  const excluded = opts.flags.excludedEntryPartIds;
+  let entryAddBackFeesUsd: number;
+  let entryAddBackSlippageUsd: number;
+  if (!opts.flags.inclEntryCost) {
+    // The master switch works off the AGGREGATES, not the parts, so it stays
+    // exact even when the itemisation is unavailable.
+    entryAddBackFeesUsd = opts.perpEntryFeesUsd;
+    entryAddBackSlippageUsd = opts.perpEntrySlippageUsd ?? 0;
+  } else {
+    entryAddBackFeesUsd = 0;
+    entryAddBackSlippageUsd = 0;
+    for (const p of parts) {
+      if (!excluded?.has(p.id)) continue; // unknown ids simply never match
+      if (p.kind === 'fees') entryAddBackFeesUsd += p.usd;
+      else entryAddBackSlippageUsd += p.usd;
+    }
+  }
+  const entryAddBackUsd = entryAddBackFeesUsd + entryAddBackSlippageUsd;
+  // The parts must decompose the aggregates exactly, or the numbers and the
+  // waterfalls quietly disagree. Same doctrine as ProfitBars' drift guard.
+  if (import.meta.env.DEV && parts.length > 0) {
+    const summed = parts.reduce((a, p) => a + p.usd, 0);
+    const aggregate = opts.perpEntryFeesUsd + (opts.perpEntrySlippageUsd ?? 0);
+    if (Math.abs(summed - aggregate) > 0.01) {
+      // eslint-disable-next-line no-console
+      console.warn('entry parts drift', { summed, aggregate });
+    }
+  }
   const currentNetUsd = opts.realizedPnlUsd + entryAddBackUsd;
   const netUsd = currentNetUsd - exitUsd;
   let apr = opts.realizedApr;
@@ -87,6 +127,8 @@ export function applyCostFlags(opts: {
   return {
     exitUsd,
     entryAddBackUsd,
+    entryAddBackFeesUsd,
+    entryAddBackSlippageUsd,
     currentNetUsd,
     netUsd,
     apr,

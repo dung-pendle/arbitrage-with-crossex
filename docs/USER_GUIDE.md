@@ -30,7 +30,7 @@ A few things to note about the assumptions:
 - Other than that, its all about understanding the other assumptions:
 ![The assumptions bar above the Opportunities scan — notional, perp entry, perp exit cost and Boros entry](./Assumptions.png)
 - For perp entry, **"Limit + hedge"** means the terminal will place a limit order on exchange A, wait for it to be filled, and immediately market order on the other exchange to hedge. This will save on perp fees (because *maker* fees is cheaper than *taker* fees)
-- For perp exit cost, if you do not need to close the Perp positions (and be able to lock in another Boros spread in a subsequent 4-legged position), it's called a **"Roll over"** (instead of **"Close positions"**), which saves the perp fees.
+- For perp exit cost, if you do not need to close the Perp positions (and be able to lock in another Boros spread in a subsequent 4-legged position), you can **Omit** it (instead of **Include**), which saves the perp fees.
 - On Boros, **"At mark rate"** assumes you can enter the Boros legs without any price impact *(which could be unrealistic)*. **"Market at size"** assumes you do market orders on Boros for both legs. An optimised execution is to try to fill limit orders on one or two legs, to reduce price impact (and fees).
 
 Other than that, the details are pretty self-explanatory. Try toggling the assumptions to see how it affects the PnL items.
@@ -72,12 +72,17 @@ What's most useful is to understand and breakdown the PnL for your positions.
 Each open position has two assumptions you can toggle, and both move the numbers *and* the waterfall charts:
 
 **Perp exit cost** — what happens to the perp legs at maturity:
-- **Close positions**. This is the default, and you need to incur another set of Perp trading fees. The chart uses the same fees and slippage as when you opened the perp legs.
-- **Roll over**: this means you don't need to pay perp fees for closing, which boosts your overall return. To do this, you need to be able to lock a decent spread on Boros, on the same perp pair, on a next maturity.
+- **Include**. This is the default, and you need to incur another set of Perp trading fees. The chart uses the same fees and slippage as when you opened the perp legs.
+- **Omit (rolling over)**: this means you don't need to pay perp fees for closing, which boosts your overall return. To do this, you need to be able to lock a decent spread on Boros, on the same perp pair, on a next maturity.
 
 **Perp entry cost** — whether this position is charged what it cost to open the perp legs:
 - **Include**. The default, and correct whenever you opened the perp legs for this position.
 - **Omit (rolled over)**: use this when the perp legs were *already open* and you rolled them into this maturity. They paid their fees and crossed their spread during the previous position, but Gate reports a position's fees cumulatively and its entry price from the original open — so without this toggle, this position gets billed for money it never spent. Omitting moves the Current PnL as well as the projection.
+
+Under **Include**, the **▾** button next to it itemises that cost so you can charge only *some* of it — useful when a book was built across several executions (a venue migration, a top-up, legs inherited from a previous maturity). Everything is ticked by default, the button shows how many parts are still charged (e.g. *Include (3 of 4)*), and your ticks are remembered per position. There are two kinds of row, and they are not equally precise:
+
+- **Entry slip** rows are **per execution**, each with its date, the two venues crossed and the size matched. Untick the ones whose fills belonged to an earlier strategy.
+- **Fees** rows are **per leg**, marked *position life*. Gate reports a position's trading fees as a single cumulative number and nothing records them per trade, so they genuinely cannot be split by date — the terminal shows them per leg rather than inventing a split. Note this also means a leg you have since migrated away from contributes nothing at all, since it is no longer an open position.
 
 ## 3. How to maximise return
 These few factors move the needle the most in maximising your return on the 4-legged Funding Rate Arbitrage
@@ -86,7 +91,7 @@ These few factors move the needle the most in maximising your return on the 4-le
    * As an example, my current VIP8 tier boosts a particular opportunity from **11.3% APR** to **16.2% APR**. For reference, I need a 400k capital in Gate to get VIP8 tier.
 2. **Rolling over**
    * Being able to roll over an existing 4-legged position into the next maturity is a powerful boost to your return
-   * The boost is two-fold: the existing position will escape the perp closing fees, and the new position will escape the perp opening fees. Just change the assumption from **Close positions** to **Roll over** to see the impact on the return (and set the next position's **Perp entry cost** to **Omit**, since it inherits legs that already paid).
+   * The boost is two-fold: the existing position will escape the perp closing fees, and the new position will escape the perp opening fees. Just change the **Perp exit cost** assumption from **Include** to **Omit (rolling over)** to see the impact on the return (and on the next position, untick the inherited executions under **Perp entry cost**, since those legs already paid).
    * If you manage to keep rolling over, the subsequent 4-legged position wont have to pay **a single cent of perp fees** (for both entry and exit), which boosts the return even more.
 3. Reduce perp fees + slipapge through an optimised execution of **Limit + hedge**
    * The goal is to minimise slipapge when executing the **Limit + hedge**. Its even possible to get possible slippage (for example, short Hyperliquid ETH at 1601, long OKX ETH at 1600)

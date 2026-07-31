@@ -22,6 +22,7 @@ import type {
   StrategyRollup,
   SymbolRule,
   UpdateStatus,
+  PerpEntryCostPart,
 } from '../api/types';
 import { env } from './server';
 
@@ -321,6 +322,51 @@ function hypeLegs(): StrategyLeg[] {
   ];
 }
 
+/** A book built across TWO executions (the case the tickable entry cost exists
+ * for), plus one fee part per live leg. Sums to perpTradingUsd 65.00 +
+ * perpEntrySlippageUsd 49.16 = 114.16 — the invariant the card depends on. */
+function hypeEntryCostParts(): PerpEntryCostPart[] {
+  return [
+    {
+      id: 'slip:deal:deal-a',
+      kind: 'slippage',
+      usd: 30.0,
+      atSec: STRATEGY_OPENED - 3 * 86_400,
+      venues: ['HYPERLIQUID', 'GATE'],
+      side: null,
+      qty: 900,
+    },
+    {
+      id: 'slip:deal:deal-b',
+      kind: 'slippage',
+      usd: 19.16,
+      atSec: STRATEGY_OPENED,
+      venues: ['GATE', 'BYBIT'],
+      side: null,
+      qty: 900,
+    },
+    // Per LEG, not per execution — Gate reports a position's fee cumulatively.
+    {
+      id: 'fees:BYBIT_FUTURE_HYPE_USDT',
+      kind: 'fees',
+      usd: 20.55,
+      atSec: null,
+      venues: ['BYBIT'],
+      side: 'LONG',
+      qty: null,
+    },
+    {
+      id: 'fees:HYPERLIQUID_FUTURE_HYPE_USDC',
+      kind: 'fees',
+      usd: 44.46,
+      atSec: null,
+      venues: ['HYPERLIQUID'],
+      side: 'SHORT',
+      qty: null,
+    },
+  ];
+}
+
 export function makeStrategyRollup(overrides: Partial<StrategyRollup> = {}): StrategyRollup {
   return {
     base: 'HYPE',
@@ -336,19 +382,20 @@ export function makeStrategyRollup(overrides: Partial<StrategyRollup> = {}): Str
     lockedAprOnCapital: 0.2715,
     spreadReturnUsd: 411.81,
     // spread return − paid.totalUsd (119.53) − future Boros settle (10.06).
-    expectedPnlToMaturityUsd: 411.81 - (65.0 + 49.16 + 3.77 + 1.6) - 10.06,
+    expectedPnlToMaturityUsd: 411.81 - (65.01 + 49.16 + 3.77 + 1.6) - 10.06,
     elapsedSeconds: STRATEGY_NOW - STRATEGY_OPENED,
     clockBasis: 'boros-open',
     clockStartSec: STRATEGY_OPENED,
     secondsToMaturity: STRATEGY_MATURITY - STRATEGY_NOW,
     notionalMismatchUsd: 3032,
+    perpEntryCostParts: hypeEntryCostParts(),
     feesUsd: {
       paid: {
-        perpTradingUsd: 65.0,
+        perpTradingUsd: 65.01, // === Σ perp leg feesUsd (20.55 + 44.46)
         perpEntrySlippageUsd: 49.16,
         borosTradeUsd: 3.77,
         borosSettlementUsd: 1.6,
-        totalUsd: 65.0 + 49.16 + 3.77 + 1.6, // 119.53… kept exact by construction
+        totalUsd: 65.01 + 49.16 + 3.77 + 1.6, // 119.54… kept exact by construction
       },
       future: {
         perpExitFeesUsd: 80,

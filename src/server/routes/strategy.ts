@@ -222,6 +222,7 @@ export function strategyRoutes(deps: AppDeps) {
           dealFills = deps.engine.store
             .dealFillReports()
             .map((r) => ({
+              dealId: r.dealId,
               aContract: r.aContract,
               aSide: r.aSide as DealFillRecord['aSide'],
               bContract: r.bContract,

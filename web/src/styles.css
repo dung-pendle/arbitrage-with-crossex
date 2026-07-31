@@ -65,6 +65,14 @@
     @apply bg-ink-700 text-ink-100;
   }
 
+  /* The first styled checkbox in the app: native input, house colours. Native
+     keeps keyboard + screen-reader behaviour for free, which a div-based
+     lookalike would have to rebuild. */
+  .chk {
+    @apply h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-ink-600 bg-ink-950;
+    accent-color: theme('colors.cyan.500');
+  }
+
   .card {
     @apply rounded-xl border border-ink-700 bg-ink-900;
   }

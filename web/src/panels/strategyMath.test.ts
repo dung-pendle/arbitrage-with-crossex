@@ -101,3 +101,87 @@ describe('applyCostFlags — entry vs exit stay independent', () => {
     expect(r.apr).toBeNull();
   });
 });
+
+/** The itemised entry cost: a book built across several executions can drop the
+ * ones that belonged to an earlier strategy, one at a time. */
+describe('applyCostFlags — per-part entry exclusion', () => {
+  const parts = [
+    { id: 'slip:deal:a', kind: 'slippage' as const, usd: 12, atSec: 1, venues: [], side: null, qty: 1 },
+    { id: 'slip:deal:b', kind: 'slippage' as const, usd: 8, atSec: 2, venues: [], side: null, qty: 1 },
+    { id: 'fees:X', kind: 'fees' as const, usd: 18, atSec: null, venues: [], side: 'LONG' as const, qty: null },
+    { id: 'fees:Y', kind: 'fees' as const, usd: 12, atSec: null, venues: [], side: 'SHORT' as const, qty: null },
+  ]; // 20 slippage + 30 fees = the 20/30 aggregates in `base`
+
+  const withParts = (excluded: string[]) =>
+    applyCostFlags({
+      ...base,
+      perpEntryFeesUsd: 30,
+      perpEntrySlippageUsd: 20,
+      perpEntryParts: parts,
+      flags: { ...ALL_OFF, excludedEntryPartIds: new Set(excluded) },
+    });
+
+  it('ticking everything charges everything — the default', () => {
+    const r = withParts([]);
+    expect(r.entryAddBackUsd).toBe(0);
+    expect(r.currentNetUsd).toBe(100);
+  });
+
+  it('hands back exactly the un-ticked execution, and nothing else', () => {
+    const r = withParts(['slip:deal:a']);
+    expect(r.entryAddBackUsd).toBe(12);
+    expect(r.entryAddBackSlippageUsd).toBe(12);
+    expect(r.entryAddBackFeesUsd).toBe(0); // the fee rows are untouched
+    expect(r.currentNetUsd).toBe(112);
+    expect(r.expectedUsd).toBe(512);
+  });
+
+  it('splits the add-back by kind so each waterfall bar can shrink on its own', () => {
+    const r = withParts(['slip:deal:b', 'fees:X']);
+    expect(r.entryAddBackSlippageUsd).toBe(8);
+    expect(r.entryAddBackFeesUsd).toBe(18);
+    expect(r.entryAddBackUsd).toBe(26);
+  });
+
+  it('un-ticking every part matches the master switch exactly', () => {
+    const all = withParts(parts.map((p) => p.id));
+    const omitted = applyCostFlags({
+      ...base,
+      perpEntryFeesUsd: 30,
+      perpEntrySlippageUsd: 20,
+      perpEntryParts: parts,
+      flags: { ...ALL_OFF, inclEntryCost: false },
+    });
+    expect(all.entryAddBackUsd).toBe(omitted.entryAddBackUsd);
+    expect(all.currentNetUsd).toBe(omitted.currentNetUsd);
+  });
+
+  it('ignores ids it does not recognise (a part that has since vanished)', () => {
+    const r = withParts(['slip:deal:gone', 'fees:closed-leg']);
+    expect(r.entryAddBackUsd).toBe(0);
+  });
+
+  it('the master switch still works off the aggregates when nothing is itemised', () => {
+    // An older payload, or a book the server could not decompose: Omit must
+    // still hand back the full amount rather than silently doing nothing.
+    const r = applyCostFlags({
+      ...base,
+      perpEntryFeesUsd: 30,
+      perpEntrySlippageUsd: 20,
+      perpEntryParts: [],
+      flags: { ...ALL_OFF, inclEntryCost: false, excludedEntryPartIds: new Set(['whatever']) },
+    });
+    expect(r.entryAddBackUsd).toBe(50);
+  });
+
+  it('exclusions are ignored entirely while the master switch is off', () => {
+    const r = applyCostFlags({
+      ...base,
+      perpEntryFeesUsd: 30,
+      perpEntrySlippageUsd: 20,
+      perpEntryParts: parts,
+      flags: { ...ALL_OFF, inclEntryCost: false, excludedEntryPartIds: new Set(['fees:X']) },
+    });
+    expect(r.entryAddBackUsd).toBe(50); // everything, not 18
+  });
+});

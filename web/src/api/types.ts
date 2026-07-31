@@ -223,6 +223,34 @@ export interface StrategyLeg {
   warnings: string[];
 }
 
+/** One tickable piece of a strategy's PAID perp entry cost.
+ *
+ * INVARIANT: the parts sum to
+ *   feesUsd.paid.perpTradingUsd + (feesUsd.paid.perpEntrySlippageUsd ?? 0)
+ * — the card subtracts the un-ticked ones from exactly those two aggregates.
+ *
+ * The kinds are NOT symmetric, and the UI says so:
+ *  - `slippage` is per EXECUTION — one per journal deal (a venue migration or a
+ *    DCA top-up each get their own), or a single whole-book part when both legs
+ *    were opened together.
+ *  - `fees` is per LEG, covering that position's whole life: Gate reports a
+ *    position's fee as one cumulative scalar and nothing records a trading fee
+ *    more finely, so a per-execution split would be invented. A leg migrated
+ *    away from has no live position and so never appears here. */
+export interface PerpEntryCostPart {
+  id: string;
+  kind: 'slippage' | 'fees';
+  /** Signed — a favorable crossing is negative. */
+  usd: number;
+  /** Null when the cost has no single point in time (a leg's lifetime fees). */
+  atSec: number | null;
+  /** Two venues for a slippage part, one for fees. */
+  venues: string[];
+  side: 'LONG' | 'SHORT' | null;
+  /** Matched qty — slippage parts only. */
+  qty: number | null;
+}
+
 /** The strategy's cost ledger split by paid (money already gone) vs future
  * (still ahead). expectedPnlToMaturityUsd = spread return − paid.totalUsd −
  * future.borosSettlementUsd; the perp exit parts are folded in client-side,
@@ -298,6 +326,10 @@ export interface StrategyRollup {
   secondsToMaturity: number;
   notionalMismatchUsd: number;
   feesUsd: StrategyFees;
+  /** The PAID perp entry cost, itemised so a user can drop the executions that
+   * belong to an earlier strategy. Sums to paid.perpTradingUsd +
+   * (paid.perpEntrySlippageUsd ?? 0). */
+  perpEntryCostParts: PerpEntryCostPart[];
   warnings: string[];
 }
 

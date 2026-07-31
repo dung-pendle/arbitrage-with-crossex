@@ -43,13 +43,13 @@ describe('StrategyCard — hero tiers', () => {
     render(card());
     rollOver();
     expect(screen.getByText('Fixed APR on capital')).toBeInTheDocument();
-    // Net PnL by maturity 282.22 over capital 41,320, annualized across the
+    // Net PnL by maturity 282.21 over capital 41,320, annualized across the
     // 14-day life (start → maturity): 282.22 / (41,320 × 14/365) = 17.81%.
     expect(screen.getByText('+17.81%')).toBeInTheDocument();
     expect(screen.getByText('Capital')).toBeInTheDocument();
     expect(screen.getByText('$41,320')).toBeInTheDocument();
     expect(screen.getByText(/PNL by maturity/)).toBeInTheDocument();
-    // 411.81 − 119.53 − 10.06 = 282.22 → "+$282" at 0dp.
+    // 411.81 − 119.54 − 10.06 = 282.21 → "+$282" at 0dp.
     expect(screen.getAllByText('+$282').length).toBeGreaterThan(0);
     // Current net PnL sits right of Profit by maturity: realizedPnlUsd at 0dp.
     expect(screen.getByText('Current PnL')).toBeInTheDocument();
@@ -76,7 +76,7 @@ describe('StrategyCard — hero tiers', () => {
 
   it('folds the checked exit parts into the hero numbers by default', () => {
     render(card()); // defaults to 'Include' → both exit parts on
-    // Profit: 282.22 − (80 + 49.16) = 153.06 → "+$153" (hero + target annotation).
+    // Profit: 282.21 − (80 + 49.16) = 153.05 → "+$153" (hero + target annotation).
     expect(screen.getAllByText('+$153').length).toBeGreaterThan(0);
     expect(screen.queryByText('+$282')).not.toBeInTheDocument();
     // The APR follows that same net PnL: 153.06 / (41,320 × 14/365) = 9.66%,
@@ -116,7 +116,7 @@ describe('StrategyCard — hero tiers', () => {
       screen.getByTitle(/maker\+hedge close .* exit slippage equal to the entry slippage/),
     ).toBeInTheDocument();
     // Back to Include = both exit parts folded in at once:
-    // 282.22 − 80 − 49.16 = 153.06 → "+$153".
+    // 282.21 − 80 − 49.16 = 153.05 → "+$153".
     await userEvent.click(within(exitGroup()).getByRole('radio', { name: 'Include' }));
     expect(screen.getAllByText('+$153').length).toBeGreaterThan(0);
   });
@@ -190,15 +190,15 @@ describe('StrategyCard — profit waterfall + legend', () => {
   });
 
   it('the waterfall identity holds: the last cost lands exactly on the profit total', () => {
-    const { container } = render(card()); // Roll over → profit 282.22
+    const { container } = render(card()); // Roll over → profit 282.21
     rollOver();
     openDetails();
     const levels = [
       ...container.querySelectorAll('[data-kind^="cost"]:not([data-segment^="now-"])'),
     ].map((el) => Number(el.getAttribute('data-level')));
-    expect(levels.at(-1)).toBeCloseTo(282.22, 2);
+    expect(levels.at(-1)).toBeCloseTo(282.21, 2);
     const profit = container.querySelector('[data-segment="profit"]');
-    expect(Number(profit?.getAttribute('data-level'))).toBeCloseTo(282.22, 2);
+    expect(Number(profit?.getAttribute('data-level'))).toBeCloseTo(282.21, 2);
     expect(profit?.getAttribute('data-tone')).toBe('pos');
     expect(profit?.className).toContain('emerald');
   });
@@ -288,6 +288,11 @@ describe('StrategyCard — profit waterfall + legend', () => {
             totalUsd: base.feesUsd.paid.totalUsd - (49.16 - -12.5),
           },
         },
+        // The parts decompose paid.* — they have to move with it, or the
+        // card's own drift guard (rightly) complains.
+        perpEntryCostParts: base.perpEntryCostParts.map((p) =>
+          p.kind === 'slippage' ? { ...p, usd: p.id.endsWith('deal-a') ? -12.5 : 0 } : p,
+        ),
       }),
     );
     rollOver();
@@ -605,11 +610,11 @@ describe('StrategyCard — perp entry cost', () => {
     expect(screen.getByText('-$115')).toBeInTheDocument();
 
     omitEntry();
-    // Add-back = perp trading fees 65.00 + entry slippage 49.16 = 114.16.
-    // Projection 282.22 + 114.16 = 396.38 → "+$396"; APR 396.38 / (41,320 × 14/365).
+    // Add-back = perp trading fees 65.01 + entry slippage 49.16 = 114.17.
+    // Projection 282.21 + 114.17 = 396.38 → "+$396"; APR 396.38 / (41,320 × 14/365).
     expect(screen.getAllByText('+$396').length).toBeGreaterThan(0);
     expect(screen.getByText('+25.01%')).toBeInTheDocument();
-    // Current PnL moves too: −114.91 + 114.16 = −0.75.
+    // Current PnL moves too: −114.91 + 114.17 = −0.74.
     expect(screen.getByText('-$1')).toBeInTheDocument();
     expect(screen.queryByText('-$115')).not.toBeInTheDocument();
   });
@@ -622,13 +627,13 @@ describe('StrategyCard — perp entry cost', () => {
       Number(container.querySelector('[data-segment="now-total"]')?.getAttribute('data-level'));
     expect(level()).toBeCloseTo(-114.91, 2);
     omitEntry();
-    expect(level()).toBeCloseTo(-0.75, 2);
+    expect(level()).toBeCloseTo(-0.74, 2);
   });
 
   it('composes with the exit toggle — the two assumptions stay independent', () => {
     render(card()); // Close positions (default) + Omit
     omitEntry();
-    // 282.22 + 114.16 − (80 + 49.16) = 267.22. The exit slippage still folds in
+    // 282.21 + 114.17 − (80 + 49.16) = 267.22. The exit slippage still folds in
     // at its FULL magnitude even though the server seeds it from the very entry
     // slippage just handed back — you still have to cross back out.
     expect(screen.getAllByText('+$267').length).toBeGreaterThan(0);
@@ -665,6 +670,98 @@ describe('StrategyCard — perp entry cost', () => {
     ).toBeCloseTo(396.38, 2);
     expect(
       Number(container.querySelector('[data-segment="now-total"]')?.getAttribute('data-level')),
-    ).toBeCloseTo(-0.75, 2);
+    ).toBeCloseTo(-0.74, 2);
+  });
+});
+
+/** The itemised entry cost. The fixture is a book built across TWO executions
+ * (deal-a $30.00, deal-b $19.16) plus one fee row per live leg ($20.55 Bybit,
+ * $44.46 Hyperliquid) — 4 parts totalling the 65.01 + 49.16 aggregates. */
+describe('StrategyCard — itemised entry cost', () => {
+  const itemise = () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Itemise the perp entry cost' }));
+  const entryGroup = () => screen.getByRole('radiogroup', { name: 'Perp entry cost' });
+  const includeRadio = (name: string) => within(entryGroup()).getByRole('radio', { name });
+
+  /** Two executions can carry identical prose, so address a row by its part id
+   * — the same identity the ticks are persisted under. */
+  const rowFor = (container: HTMLElement, partId: string) =>
+    container.querySelector(`[data-part="${partId}"] input`) as HTMLInputElement;
+
+  it('counts what is charged, and lists every execution with its date', () => {
+    render(card());
+    expect(includeRadio('Include (4 of 4)')).toBeInTheDocument();
+    itemise();
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(4);
+    expect(boxes.every((b) => (b as HTMLInputElement).checked)).toBe(true);
+    // Slippage rows are per execution; fee rows say they are not.
+    expect(screen.getAllByText('Entry slip')).toHaveLength(2);
+    expect(screen.getAllByText('position life')).toHaveLength(2);
+  });
+
+  it('un-ticking one execution hands back exactly that part', () => {
+    const { container } = render(card());
+    rollOver(); // isolate from the exit assumption
+    expect(screen.getAllByText('+$282').length).toBeGreaterThan(0);
+    itemise();
+    fireEvent.click(rowFor(container, 'slip:deal:deal-a'));
+    // deal-a cost $30.00 → 282.21 + 30 = 312.21.
+    expect(screen.getAllByText('+$312').length).toBeGreaterThan(0);
+    expect(includeRadio('Include (3 of 4)')).toBeInTheDocument();
+    // Current PnL moves with it: −114.91 + 30 = −84.91.
+    expect(screen.getByText('-$85')).toBeInTheDocument();
+  });
+
+  it('shrinks the waterfall bars rather than dropping them, and still lands', () => {
+    const { container } = render(card());
+    rollOver();
+    itemise();
+    fireEvent.click(rowFor(container, 'slip:deal:deal-a'));
+    openDetails();
+    const segs = [...container.querySelectorAll('[data-segment]')].map((el) =>
+      el.getAttribute('data-segment'),
+    );
+    // Still charged 19.16 of slippage, so the bar stays — it just got smaller.
+    expect(segs).toContain('paid-entry-slippage');
+    expect(segs).toContain('paid-perp-fees');
+    expect(
+      Number(container.querySelector('[data-segment="profit"]')?.getAttribute('data-level')),
+    ).toBeCloseTo(312.21, 2);
+    expect(
+      Number(container.querySelector('[data-segment="now-total"]')?.getAttribute('data-level')),
+    ).toBeCloseTo(-84.91, 2);
+  });
+
+  it('remembers the ticks across a remount — it records a fact, not a preference', () => {
+    const first = render(card());
+    itemise();
+    fireEvent.click(rowFor(first.container, 'slip:deal:deal-a'));
+    expect(includeRadio('Include (3 of 4)')).toBeInTheDocument();
+    first.unmount();
+
+    render(card());
+    expect(includeRadio('Include (3 of 4)')).toBeInTheDocument();
+    itemise();
+    expect(screen.getAllByRole('checkbox').filter((b) => (b as HTMLInputElement).checked)).toHaveLength(3);
+  });
+
+  it('hides the itemisation under Omit — there is nothing left to pick', () => {
+    render(card());
+    itemise();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(4);
+    omitEntry();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(
+      screen.queryByRole('button', { name: 'Itemise the perp entry cost' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('says so plainly when a position could not be itemised', () => {
+    render(card({ perpEntryCostParts: [] }));
+    // No count to show, and the master switch is the only control left.
+    expect(includeRadio('Include')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Itemise the perp entry cost' }));
+    expect(screen.getByText(/couldn't be itemised/)).toBeInTheDocument();
   });
 });

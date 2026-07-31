@@ -79,6 +79,8 @@ export interface PerpFundingLedger {
  * market move between the legs' open times. Contracts are venue-qualified
  * CrossEx symbols. */
 export interface DealFillRecord {
+  /** The journal pair row's id — stable identity for this one execution. */
+  dealId: string;
   aContract: string;
   aSide: 'BUY' | 'SELL';
   bContract: string;
@@ -123,6 +125,39 @@ export interface StrategyLeg {
    * 4s-polled position (entry/mark/leverage display + close/lev actions). */
   symbol?: string;
   warnings: string[];
+}
+
+/** One tickable piece of a strategy's PAID perp entry cost.
+ *
+ * INVARIANT: the parts always sum to
+ *   paid.perpTradingUsd + (paid.perpEntrySlippageUsd ?? 0)
+ * — the client subtracts the un-ticked ones from exactly those two aggregates,
+ * so any drift shows up immediately as a waterfall that misses its total.
+ *
+ * The two kinds are NOT symmetric, and the UI has to say so:
+ *  - `slippage` is genuinely per-execution — one part per journal deal (a venue
+ *    migration or a DCA top-up each get their own), or a single whole-book part
+ *    when both legs were opened together.
+ *  - `fees` is per LEG, covering that position's whole life. Gate reports a
+ *    position's `fee` as one cumulative scalar, and neither the deal journal nor
+ *    the funding ledger records a trading fee at any finer granularity, so a
+ *    per-execution split would be a fabrication. A leg migrated away from has no
+ *    live position and therefore contributes nothing here at all. */
+export interface PerpEntryCostPart {
+  /** Stable across reloads: the client persists the un-ticked ids. */
+  id: string;
+  kind: 'slippage' | 'fees';
+  /** Signed — a favorable crossing is negative. */
+  usd: number;
+  /** Unix seconds; null when the cost has no single point in time (a leg's
+   * lifetime fees). */
+  atSec: number | null;
+  /** Two venues for a slippage part (the pair that was crossed), one for fees. */
+  venues: string[];
+  /** Fees parts only. */
+  side: 'LONG' | 'SHORT' | null;
+  /** Matched qty — slippage parts only. */
+  qty: number | null;
 }
 
 /** The strategy's cost ledger, split by whether the money is already gone
@@ -227,6 +262,10 @@ export interface StrategyRollup {
   /** Σ per-venue |residual floating notional| — 0 when perfectly hedged. */
   notionalMismatchUsd: number;
   feesUsd: StrategyFees;
+  /** The PAID perp entry cost, itemised so the client can let a user drop the
+   * executions that belong to an earlier strategy. Sums to
+   * feesUsd.paid.perpTradingUsd + (feesUsd.paid.perpEntrySlippageUsd ?? 0). */
+  perpEntryCostParts: PerpEntryCostPart[];
   /** Plain-language sentences, ready to render. */
   warnings: string[];
 }
@@ -524,9 +563,10 @@ export function chainPerpEntrySlippageUsd(
     shortQty: number;
     earliestOpenSec: number | null;
   },
-): { usd: number; deals: number } | null {
+): { usd: number; deals: number; parts: PerpEntryCostPart[] } | null {
   const sinceSec = (pair.earliestOpenSec ?? 0) - DEAL_CHAIN_LOOKBACK_SEC;
   const netQtyBySymbol = new Map<string, number>();
+  const parts: PerpEntryCostPart[] = [];
   let gapUsd = 0;
   let used = 0;
   for (const d of deals) {
@@ -538,7 +578,21 @@ export function chainPerpEntrySlippageUsd(
     if (!(matched > 0) || !(d.aAvgFill > 0) || !(d.bAvgFill > 0)) return null;
     const longFill = d.aSide === 'BUY' ? d.aAvgFill : d.bAvgFill;
     const shortFill = d.aSide === 'BUY' ? d.bAvgFill : d.aAvgFill;
-    gapUsd += (longFill - shortFill) * matched;
+    const dealGapUsd = (longFill - shortFill) * matched;
+    gapUsd += dealGapUsd;
+    // Same arithmetic, kept per deal: the caller lists these so a user can
+    // drop the executions that belong to an EARLIER strategy.
+    parts.push({
+      id: `slip:deal:${d.dealId}`,
+      kind: 'slippage',
+      usd: dealGapUsd,
+      atSec: d.createdAtSec,
+      venues: [parseSymbol(d.aContract).exchange, parseSymbol(d.bContract).exchange].map(
+        normalizeVenue,
+      ),
+      side: null,
+      qty: matched,
+    });
     netQtyBySymbol.set(
       d.aContract,
       (netQtyBySymbol.get(d.aContract) ?? 0) + (d.aSide === 'BUY' ? d.aFilled : -d.aFilled),
@@ -557,7 +611,7 @@ export function chainPerpEntrySlippageUsd(
   for (const s of symbols) {
     if (Math.abs((netQtyBySymbol.get(s) ?? 0) - expected(s)) > band) return null;
   }
-  return { usd: gapUsd, deals: used };
+  return { usd: gapUsd, deals: used, parts };
 }
 
 function assembleStrategy(
@@ -751,6 +805,10 @@ function assembleStrategy(
   const shortPerps = perpBuilds.filter((b) => b.leg.side === 'SHORT');
   let perpEntrySlippageUsd: number | null = perpBuilds.length === 0 ? 0 : null;
   let slippageCauseWarned = false;
+  // The tickable decomposition of the entry cost. Slippage parts are appended
+  // by whichever branch below produces a number; the per-leg fee parts follow.
+  // These MUST sum to perpTradingUsd + (perpEntrySlippageUsd ?? 0).
+  const perpEntryCostParts: PerpEntryCostPart[] = [];
   if (perpBuilds.length === 2 && longPerps.length === 1 && shortPerps.length === 1) {
     const [lo] = longPerps;
     const [sh] = shortPerps;
@@ -760,7 +818,19 @@ function assembleStrategy(
       const synced =
         loOpen !== null && shOpen !== null && Math.abs(loOpen - shOpen) <= PERP_ENTRY_SYNC_MAX_SEC;
       if (synced) {
-        perpEntrySlippageUsd = (lo.entryPrice - sh.entryPrice) * Math.min(lo.qty, sh.qty);
+        const matched = Math.min(lo.qty, sh.qty);
+        perpEntrySlippageUsd = (lo.entryPrice - sh.entryPrice) * matched;
+        // Both legs opened together, so the whole book is ONE execution — there
+        // is nothing finer to tick, but it still lists alongside the fees.
+        perpEntryCostParts.push({
+          id: 'slip:live',
+          kind: 'slippage',
+          usd: perpEntrySlippageUsd,
+          atSec: Math.min(loOpen, shOpen),
+          venues: [lo.leg.venue, sh.leg.venue],
+          side: null,
+          qty: matched,
+        });
       } else {
         const opens = [loOpen, shOpen].filter((t): t is number => t !== null && t > 0);
         const chained = dealFills?.length
@@ -779,6 +849,7 @@ function assembleStrategy(
             : 'the perp legs were opened at different times, so the live entry gap would include market drift';
         if (chained !== null) {
           perpEntrySlippageUsd = chained.usd;
+          perpEntryCostParts.push(...chained.parts);
           warnings.push(
             `Entry slippage for ${base} is summed from ${chained.deals} deal${chained.deals === 1 ? '' : 's'} in this terminal's journal (${cause}).`,
           );
@@ -795,6 +866,22 @@ function assembleStrategy(
     warnings.push(
       `Entry slippage for ${base} is unknown (not a simple 1-long/1-short perp pair with known entries) — it is excluded from the cost totals.`,
     );
+  }
+  // One fee part per LIVE perp leg. Gate reports each position's `fee` as a
+  // single cumulative scalar covering the position's whole life, so this is as
+  // fine as the data honestly goes — and a leg migrated away from has no live
+  // position, so it never appears here (nor in perpTradingUsd).
+  for (const b of perpBuilds) {
+    if (b.leg.feesUsd === 0) continue;
+    perpEntryCostParts.push({
+      id: `fees:${b.symbol}`,
+      kind: 'fees',
+      usd: b.leg.feesUsd,
+      atSec: null,
+      venues: [b.leg.venue],
+      side: b.leg.side,
+      qty: null,
+    });
   }
 
   // --- Realized ----------------------------------------------------------------
@@ -902,6 +989,7 @@ function assembleStrategy(
     clockStartSec: clockStart,
     secondsToMaturity: Math.max(0, maturity - nowSec),
     notionalMismatchUsd,
+    perpEntryCostParts,
     feesUsd: {
       paid: {
         perpTradingUsd,

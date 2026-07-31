@@ -137,6 +137,18 @@ function input(over: Partial<BuildStrategiesInput> = {}): BuildStrategiesInput {
   };
 }
 
+/** The itemised entry cost must total the two aggregates it decomposes, or the
+ * client's add-back silently disagrees with the waterfalls. */
+function assertEntryPartsSum(s: {
+  perpEntryCostParts: { usd: number }[];
+  feesUsd: { paid: { perpTradingUsd: number; perpEntrySlippageUsd: number | null } };
+}) {
+  expect(s.perpEntryCostParts.reduce((a, p) => a + p.usd, 0)).toBeCloseTo(
+    s.feesUsd.paid.perpTradingUsd + (s.feesUsd.paid.perpEntrySlippageUsd ?? 0),
+    6,
+  );
+}
+
 describe('buildStrategies — canonical 4-leg book', () => {
   it('computes per-leg nets, realized total, spread, and locked APR', () => {
     const out = buildStrategies(input());
@@ -790,6 +802,7 @@ describe('buildStrategies — migrated perp pair (entry slippage chaining)', () 
   function migrationDeals(): DealFillRecord[] {
     return [
       {
+        dealId: 'deal-hl-gate',
         aContract: 'HYPERLIQUID_FUTURE_ETH_USDC',
         aSide: 'SELL',
         bContract: 'GATE_FUTURE_ETH_USDT',
@@ -801,6 +814,7 @@ describe('buildStrategies — migrated perp pair (entry slippage chaining)', () 
         createdAtSec: OPENED - 10 * DAY,
       },
       {
+        dealId: 'deal-gate-okx',
         aContract: 'GATE_FUTURE_ETH_USDT',
         aSide: 'SELL',
         bContract: 'OKX_FUTURE_ETH_USDT',
@@ -872,6 +886,7 @@ describe('buildStrategies — migrated perp pair (entry slippage chaining)', () 
     const deals = [
       ...migrationDeals(),
       {
+        dealId: 'deal-dca',
         aContract: 'HYPERLIQUID_FUTURE_ETH_USDC',
         aSide: 'SELL' as const,
         bContract: 'OKX_FUTURE_ETH_USDT',
@@ -898,6 +913,62 @@ describe('buildStrategies — migrated perp pair (entry slippage chaining)', () 
     expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeNull();
     expect(s.warnings.join(' ')).toMatch(/journal cannot reconstruct/);
   });
+
+  it('a migrated book itemises EVERY execution, each addressable by deal id', () => {
+    const s = buildStrategies(
+      input({ perpPositions: migratedPerps(), dealFills: migrationDeals() }),
+    ).strategies[0];
+    assertEntryPartsSum(s);
+    const slip = s.perpEntryCostParts.filter((p) => p.kind === 'slippage');
+    expect(slip.map((p) => p.id)).toEqual(['slip:deal:deal-hl-gate', 'slip:deal:deal-gate-okx']);
+    // Each part is that deal's OWN contemporaneous gap — the drift between
+    // deals never enters any of them.
+    expect(slip.every((p) => Math.abs(p.usd - ENTRY_SLIPPAGE) < 1e-6)).toBe(true);
+    // …and the venues name the pair actually crossed, including the venue the
+    // live book no longer holds.
+    expect(slip[0].venues.sort()).toEqual(['GATE', 'HYPERLIQUID']);
+    expect(slip[1].venues.sort()).toEqual(['GATE', 'OKX']);
+    expect(slip[0].atSec).toBeLessThan(slip[1].atSec!);
+  });
+
+  it('the DCA top-up is its own tickable part', () => {
+    const perps = migratedPerps();
+    perps[0].positionQty = '-581';
+    perps[1].positionQty = '581';
+    const deals = [
+      ...migrationDeals(),
+      {
+        dealId: 'deal-dca',
+        aContract: 'HYPERLIQUID_FUTURE_ETH_USDC',
+        aSide: 'SELL' as const,
+        bContract: 'OKX_FUTURE_ETH_USDT',
+        bSide: 'BUY' as const,
+        aFilled: 50,
+        bFilled: 50,
+        aAvgFill: 1901.0,
+        bAvgFill: 1901.2,
+        createdAtSec: OPENED + 3600,
+      },
+    ];
+    const s = buildStrategies(input({ perpPositions: perps, dealFills: deals })).strategies[0];
+    assertEntryPartsSum(s);
+    const dca = s.perpEntryCostParts.find((p) => p.id === 'slip:deal:deal-dca');
+    expect(dca?.usd).toBeCloseTo((1901.2 - 1901.0) * 50, 6);
+    expect(dca?.qty).toBe(50);
+  });
+
+  it('unknown slippage yields fee parts only — and the sum still holds', () => {
+    // A non-reconciling chain leaves slippage null; it contributes 0 to the
+    // aggregate, so listing no slippage part keeps the parts honest.
+    const perps = migratedPerps();
+    perps[0].positionQty = '-400'; // closed off-journal
+    const s = buildStrategies(
+      input({ perpPositions: perps, dealFills: migrationDeals() }),
+    ).strategies[0];
+    expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeNull();
+    expect(s.perpEntryCostParts.every((p) => p.kind === 'fees')).toBe(true);
+    assertEntryPartsSum(s);
+  });
 });
 
 describe('chainPerpEntrySlippageUsd (reducer)', () => {
@@ -910,6 +981,7 @@ describe('chainPerpEntrySlippageUsd (reducer)', () => {
     earliestOpenSec: OPENED - 10 * DAY,
   };
   const deal = (over: Partial<DealFillRecord> = {}): DealFillRecord => ({
+    dealId: 'deal-1',
     aContract: 'HYPERLIQUID_FUTURE_ETH_USDC',
     aSide: 'SELL',
     bContract: 'OKX_FUTURE_ETH_USDT',
@@ -1056,5 +1128,35 @@ describe('buildStrategies — hedgeChecks sizing gate', () => {
     expect(s.hedgeChecks.perpMatchRatio).toBe(0);
     expect(s.hedgeChecks.borosVsPerpRatio).toBe(0);
     expect(s.hedgeChecks.fullyHedged).toBe(false);
+  });
+});
+
+/** The itemised entry cost the Positions box lets a user tick through. The one
+ * property everything downstream leans on is the SUM: the parts must total the
+ * two aggregates, or the client's add-back silently disagrees with the charts. */
+describe('buildStrategies — perp entry cost parts', () => {
+  it('a book opened in one go is ONE slippage part plus a fee part per leg', () => {
+    const s = buildStrategies(input()).strategies[0];
+    assertEntryPartsSum(s);
+    const slip = s.perpEntryCostParts.filter((p) => p.kind === 'slippage');
+    const fees = s.perpEntryCostParts.filter((p) => p.kind === 'fees');
+    expect(slip).toHaveLength(1);
+    expect(slip[0].id).toBe('slip:live');
+    expect(slip[0].usd).toBeCloseTo(ENTRY_SLIPPAGE, 6);
+    expect(slip[0].qty).toBe(531);
+    expect(slip[0].atSec).toBe(OPENED);
+    expect(slip[0].venues.sort()).toEqual(['HYPERLIQUID', 'OKX']);
+    // Gate reports a position's fee cumulatively, so a fee part has no single
+    // point in time and carries its leg's side instead.
+    expect(fees).toHaveLength(2);
+    expect(fees.every((p) => p.atSec === null && p.qty === null)).toBe(true);
+    expect(fees.map((p) => p.side).sort()).toEqual(['LONG', 'SHORT']);
+    expect(fees.reduce((a, p) => a + p.usd, 0)).toBeCloseTo(412, 6);
+  });
+
+  it('a Boros-only strategy has nothing to itemise', () => {
+    const s = buildStrategies(input({ perpPositions: [] })).strategies[0];
+    expect(s.perpEntryCostParts).toEqual([]);
+    assertEntryPartsSum(s);
   });
 });

@@ -50,6 +50,7 @@ export function ProfitBars({
   legs,
   fees,
   flags,
+  entryAddBack,
   chartsOpen = true,
 }: {
   /** Gross full-life spread return (null = clock unknown → nothing renders). */
@@ -66,10 +67,21 @@ export function ProfitBars({
   fees: StrategyFees;
   /** Gates the exit and entry columns (the card's toggles own the state). */
   flags: CostFlags;
+  /** The entry cost handed back by the ticks, split by kind — each nets against
+   * its own bar so the columns SHRINK with the ticks instead of vanishing
+   * whole. Must come from the same applyCostFlags call that produced
+   * profitUsd/mtmUsd, or the running level misses its total. */
+  entryAddBack: { feesUsd: number; slippageUsd: number };
   /** Collapse toggle (the card's "Profit by maturity" box drives it). */
   chartsOpen?: boolean;
 }) {
   const { paid, future } = fees;
+  // What this strategy is STILL charged after the ticks — the aggregate less
+  // what was handed back. A fully un-ticked row lands on 0 and the loops below
+  // skip it, exactly as the all-or-nothing gate used to.
+  const chargedEntryFeesUsd = paid.perpTradingUsd - entryAddBack.feesUsd;
+  const chargedEntrySlippageUsd =
+    paid.perpEntrySlippageUsd === null ? null : paid.perpEntrySlippageUsd - entryAddBack.slippageUsd;
 
   // --- LEFT: profit-by-maturity steps -------------------------------------------
   // Signed cost rows in decrement order. The gates mirror applyCostFlags: exit
@@ -79,13 +91,13 @@ export function ProfitBars({
   const costRows: Array<[string, number | null, string, string]> = [
     [
       'paid-perp-fees',
-      flags.inclEntryCost ? paid.perpTradingUsd : null,
+      chargedEntryFeesUsd,
       'bg-amber-500',
       'Perp entry fees',
     ],
     [
       'paid-entry-slippage',
-      flags.inclEntryCost ? paid.perpEntrySlippageUsd : null,
+      chargedEntrySlippageUsd,
       'bg-amber-500/75',
       'Entry slip',
     ],
@@ -176,7 +188,7 @@ export function ProfitBars({
   const nowRows: Array<[string, number, string, string, string, string]> = [
     [
       'now-perp-entry',
-      flags.inclEntryCost ? -perpFeesUsd : 0,
+      -(perpFeesUsd - entryAddBack.feesUsd),
       'bg-emerald-500/80',
       'bg-amber-500',
       'Perp trading fees paid',
@@ -184,7 +196,7 @@ export function ProfitBars({
     ],
     [
       'now-entry-slip',
-      flags.inclEntryCost ? -(paid.perpEntrySlippageUsd ?? 0) : 0,
+      -((paid.perpEntrySlippageUsd ?? 0) - entryAddBack.slippageUsd),
       'bg-emerald-500/80',
       'bg-amber-500/75',
       'Perp entry slippage paid',

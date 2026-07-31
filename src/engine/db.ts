@@ -182,6 +182,9 @@ function toOrder(r: OrderDbRow): OrderRow {
 /** One finished two-leg deal's realized fills, verbatim journal strings —
  * consumed by the strategy route, which converts to numbers and seconds. */
 export interface DealFillReportRow {
+  /** The pair row's id — a stable identity for one execution, so the strategy
+   * view can address a single deal's contribution to the entry cost. */
+  dealId: string;
   aContract: string;
   aSide: string;
   bContract: string;
@@ -478,12 +481,13 @@ export class Store {
   dealFillReports(): DealFillReportRow[] {
     const rows = this.db
       .prepare(
-        `SELECT a_contract, a_side, b_contract, b_side, report_json, created_at FROM pair
+        `SELECT id, a_contract, a_side, b_contract, b_side, report_json, created_at FROM pair
          WHERE mode = 'DONE' AND b_contract IS NOT NULL
            AND NOT (a_reduce_only = 1 AND b_reduce_only = 1)
          ORDER BY created_at`,
       )
       .all() as unknown as {
+      id: string;
       a_contract: string;
       a_side: string;
       b_contract: string;
@@ -507,6 +511,7 @@ export class Store {
       const bAvgFill = str(report.bAvgFill);
       if (!aFilled || !bFilled || !aAvgFill || !bAvgFill) continue;
       out.push({
+        dealId: r.id,
         aContract: r.a_contract,
         aSide: r.a_side,
         bContract: r.b_contract,

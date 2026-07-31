@@ -41,6 +41,8 @@ import { SegmentedToggle } from '../components/SegmentedToggle';
 import { TimelineClockEdit } from './HomeControls';
 import { PerpLegExpanded } from './PerpLegExpanded';
 import { ProfitBars } from './ProfitBars';
+import { EntryCostParts } from './EntryCostParts';
+import { loadExcludedPartIds, saveExcludedPartIds, strategyKey } from './entryPartsStore';
 import { applyCostFlags, SECONDS_IN_YEAR, type CostFlags } from './strategyMath';
 
 function HedgeChip({ s }: { s: StrategyRollup }) {
@@ -132,25 +134,51 @@ export function StrategyCard({
   // original open, so both would otherwise be billed here. Include is the
   // default: most positions really were opened for this strategy.
   const [entryMode, setEntryMode] = useState<EntryCostMode>('include');
+  // Which individual executions this position is NOT charged. Persisted (unlike
+  // the toggles either side of it) because it records a fact about the book,
+  // not a viewing preference — see entryPartsStore.
+  const partsKey = strategyKey(s.base, s.maturity);
+  const [excludedPartIds, setExcludedPartIds] = useState<ReadonlySet<string>>(() =>
+    loadExcludedPartIds(partsKey),
+  );
+  const [partsOpen, setPartsOpen] = useState(false);
+  const partsId = `entry-parts-${partsKey}`;
+  const entryParts = s.perpEntryCostParts ?? [];
+  const toggleEntryPart = (partId: string) => {
+    setExcludedPartIds((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(partId)) next.add(partId);
+      saveExcludedPartIds(partsKey, next, Math.floor(Date.now() / 1000));
+      return next;
+    });
+  };
   const flags: CostFlags = {
     inclExitFees: exitMode === 'close',
     inclExitSlippage: exitMode === 'close',
     inclEntryCost: entryMode === 'include',
+    excludedEntryPartIds: excludedPartIds,
   };
   // Display-side application of the cost assumptions: the server never bakes
   // the exit parts into any number, and always bakes the entry parts in.
-  const { expectedUsd, currentNetUsd } = applyCostFlags({
+  const { expectedUsd, currentNetUsd, entryAddBackUsd, entryAddBackFeesUsd, entryAddBackSlippageUsd } =
+    applyCostFlags({
     flags,
     perpExitFeesUsd: s.feesUsd.future.perpExitFeesUsd,
     perpExitSlippageUsd: s.feesUsd.future.perpExitSlippageUsd,
     perpEntryFeesUsd: s.feesUsd.paid.perpTradingUsd,
     perpEntrySlippageUsd: s.feesUsd.paid.perpEntrySlippageUsd,
+    perpEntryParts: entryParts,
     realizedPnlUsd: s.realizedPnlUsd,
     realizedApr: s.realizedApr,
     expectedPnlToMaturityUsd: s.expectedPnlToMaturityUsd,
     capitalUsd: s.capitalUsd,
     elapsedSeconds: s.elapsedSeconds,
   });
+  // How many parts are still charged — the count on the Include button, so the
+  // card says at a glance that something has been dropped.
+  const chargedPartCount = entryParts.filter((p) => !excludedPartIds.has(p.id)).length;
+  const chargedEntryUsd =
+    s.feesUsd.paid.perpTradingUsd + (s.feesUsd.paid.perpEntrySlippageUsd ?? 0) - entryAddBackUsd;
   // Fixed APR on capital: the PnL expected by maturity (already exit-adjusted
   // for the chosen mode) as a return on the capital posted, annualized over the
   // FULL trade life — start → maturity. This is the net, whole-duration basis
@@ -603,6 +631,7 @@ export function StrategyCard({
               legs={s.legs}
               fees={s.feesUsd}
               flags={flags}
+              entryAddBack={{ feesUsd: entryAddBackFeesUsd, slippageUsd: entryAddBackSlippageUsd }}
             />
           </div>
         )}
@@ -634,10 +663,31 @@ export function StrategyCard({
             value={entryMode}
             onChange={setEntryMode}
             options={[
-              { value: 'include', label: 'Include' },
+              {
+                value: 'include',
+                // The count is the whole point of the disclosure: a card with
+                // executions dropped must not look like an untouched one.
+                label:
+                  entryParts.length > 0
+                    ? `Include (${chargedPartCount} of ${entryParts.length})`
+                    : 'Include',
+              },
               { value: 'omit', label: 'Omit (rolled over)' },
             ]}
           />
+          {entryMode === 'include' && (
+            <button
+              type="button"
+              aria-expanded={partsOpen}
+              aria-controls={partsId}
+              aria-label="Itemise the perp entry cost"
+              title="Itemise it — tick only the executions that belong to this position"
+              onClick={() => setPartsOpen((v) => !v)}
+              className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[10px] text-ink-400 transition-colors hover:border-ink-500 hover:text-ink-200"
+            >
+              {partsOpen ? '▴' : '▾'}
+            </button>
+          )}
         </span>
         <span
           className="flex items-center gap-1.5"
@@ -657,6 +707,16 @@ export function StrategyCard({
           />
         </span>
       </div>
+
+      {entryMode === 'include' && partsOpen && (
+        <EntryCostParts
+          id={partsId}
+          parts={entryParts}
+          excluded={excludedPartIds}
+          onToggle={toggleEntryPart}
+          chargedUsd={chargedEntryUsd}
+        />
+      )}
 
       <div className="mt-3">
         <DataTable
