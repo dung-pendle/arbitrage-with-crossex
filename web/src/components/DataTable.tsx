@@ -15,6 +15,8 @@ interface Props<T> {
   rowKey: (row: T) => string;
   /** When provided, rows get a chevron toggle and can expand to this content. */
   renderExpanded?: (row: T) => ReactNode;
+  /** Extra classes per row — e.g. dimming a row whose cancel is in flight. */
+  rowClassName?: (row: T) => string;
   /** Rendered instead of the table when rows is empty. */
   emptyState?: ReactNode;
   maxHeightClass?: string;
@@ -27,6 +29,7 @@ export function DataTable<T>({
   rows,
   rowKey,
   renderExpanded,
+  rowClassName,
   emptyState,
   maxHeightClass = 'max-h-[65vh]',
 }: Props<T>) {
@@ -63,7 +66,11 @@ export function DataTable<T>({
               const isOpen = open.has(k);
               return (
                 <Fragment key={k}>
-                  <tr className="group border-t border-ink-800 first:border-t-0 hover:bg-ink-800/50">
+                  <tr
+                    className={`group border-t border-ink-800 first:border-t-0 transition-opacity hover:bg-ink-800/50 ${
+                      rowClassName?.(row) ?? ''
+                    }`}
+                  >
                     {expandable && (
                       <td className="py-1.5 pl-2">
                         <button

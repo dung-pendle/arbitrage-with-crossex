@@ -52,8 +52,55 @@ describe('OpenOrdersPanel', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => expect(deletes).toBe(1));
-    // A refetch happens after invalidation; the DELETE must not repeat.
-    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    // The row stays marked "cancelling" while the venue still lists the order
+    // (this fixture never drops it), and the re-checks that marking triggers
+    // must not re-issue the DELETE.
+    await new Promise((r) => setTimeout(r, 1_200)); // spans a re-check tick
     expect(deletes).toBe(1);
+  });
+});
+
+describe('cancel feedback', () => {
+  // A cancel is ACCEPTED in milliseconds but the order leaves the venue later
+  // (for an engine-owned order, a loop tick later). The row used to sit there
+  // looking untouched and then vanish, so nothing told the user it worked.
+  it('marks the row cancelling until the order actually goes', async () => {
+    let cancelled = false;
+    server.use(
+      // The venue keeps reporting the order until the cancel lands.
+      http.get('/api/orders/open', () => HttpResponse.json(env(cancelled ? [] : [order]))),
+      http.delete('/api/orders/:id', () => {
+        setTimeout(() => {
+          cancelled = true;
+        }, 150);
+        return HttpResponse.json(env({ orderId: '424242', canceled: true }));
+      }),
+    );
+    renderWithClient(<OpenOrdersPanel />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    // Still listed, but visibly in progress rather than looking untouched.
+    expect(await screen.findByText('cancelling…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /cancelling/ })).toBeDisabled();
+
+    // …and it clears on its own once the order is really gone.
+    await waitFor(() => expect(screen.queryByText('cancelling…')).toBeNull(), { timeout: 4000 });
+  });
+
+  it('explains when the order is owned by a deal', async () => {
+    server.use(
+      http.get('/api/orders/open', () => HttpResponse.json(env([order]))),
+      // The engine path: the route stops the deal and the LOOP cancels.
+      http.delete('/api/orders/:id', () =>
+        HttpResponse.json(env({ id: '424242', dealId: 'deal-abc12345', cancelling: true })),
+      ),
+    );
+    renderWithClient(<OpenOrdersPanel />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText(/belongs to deal deal-abc/)).toBeInTheDocument();
+    expect(screen.getByText(/clears once the venue confirms/)).toBeInTheDocument();
   });
 });
