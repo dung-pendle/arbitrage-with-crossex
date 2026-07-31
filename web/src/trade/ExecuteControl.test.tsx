@@ -450,7 +450,52 @@ describe('a single resting limit order is a plain order', () => {
 
     // ...and the answer is a confirmation, not a deal modal.
     expect(await screen.findByText(/Limit order placed/)).toBeInTheDocument();
+    expect(screen.getByText(/BUY 0.05 ETH @ 2400/)).toBeInTheDocument(); // a receipt, not just "ok"
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('the receipt SURVIVES the ticket clearing itself', async () => {
+    // The real ticket calls onExecuted -> clearTicket on success, which changes
+    // the intent in the same cycle the receipt is set. Clearing the receipt on
+    // intent change wiped it instantly, so nothing ever confirmed the order.
+    const calls: DealRequest[] = [];
+    server.use(
+      ...baseHandlers(),
+      echoPreviewHandler({ overrides: { price: '2400', type: 'LIMIT', tif: 'POC' } }),
+      dealHandler(calls),
+    );
+
+    function ClearingHost() {
+      const [qty, setQty] = useState('1');
+      const action: ActionInput = {
+        kind: 'open-limit',
+        symbol: 'GATE_FUTURE_ETH_USDT',
+        side: 'BUY',
+        qty,
+        price: '2400',
+        tif: 'POC',
+      };
+      return (
+        <ExecuteControl
+          scope="clearing"
+          actions={qty ? [action] : null}
+          label="Go"
+          holdMs={50}
+          onExecuted={() => setQty('')}
+        />
+      );
+    }
+    renderWithClient(<ClearingHost />);
+
+    const go = () => screen.getByRole('button', { name: 'Go' });
+    await waitFor(() => expect(go()).toBeEnabled());
+    fireEvent.pointerDown(go());
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    const receipt = await screen.findByText(/Limit order placed/);
+    // Still there after the ticket has reset around it.
+    await new Promise((r) => setTimeout(r, 60));
+    expect(receipt).toBeInTheDocument();
   });
 
   it('a hedged pair still opens the deal view', async () => {

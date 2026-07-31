@@ -28,7 +28,7 @@ import type { ActionInput, DealResponse, PreviewResult } from '../api/types';
 import { HoldToConfirmButton } from '../components/HoldToConfirmButton';
 import { Spinner } from '../components/Spinner';
 import { SymbolCell } from '../components/VenueChip';
-import { fmtUsd, sig } from '../lib/fmt';
+import { fmtUsd, parseSymbol, sig } from '../lib/fmt';
 import { uuid } from '../lib/uuid';
 import { useNow } from '../lib/useNow';
 import { dealFromActions } from './deal';
@@ -110,7 +110,8 @@ export function ExecuteControl({
   // no hedge leg, no deadline, nothing to babysit. It should not drag the user
   // into the deal view — it belongs in Open Orders like any other limit order.
   const restingOnlyRef = useRef(false);
-  const [placedResting, setPlacedResting] = useState(false);
+  const placedSummaryRef = useRef<string | null>(null);
+  const [placedResting, setPlacedResting] = useState<string | null>(null);
 
   // Lazy previews only run while the card is shown; eager previews run always so
   // the button is armed the moment the ticket is complete.
@@ -131,7 +132,7 @@ export function ExecuteControl({
       // and wiping those would re-open their double-execute window.
       clearPendingBasket(inflightIntentRef.current);
       onExecuted?.();
-      if (restingOnlyRef.current) setPlacedResting(true);
+      if (restingOnlyRef.current) setPlacedResting(placedSummaryRef.current);
       else flow.openDeal(r.id);
     },
     // onError deliberately KEEPS basketIdRef so a retry of the SAME order reuses
@@ -154,7 +155,11 @@ export function ExecuteControl({
     // edited ticket still mints a fresh one; null whenever there is nothing
     // pending, which is the previous behaviour.
     basketIdRef.current = readPendingBasket(resetKey);
-    setPlacedResting(false); // a new intent supersedes the last confirmation
+    // Deliberately NOT clearing the "placed" receipt here: the ticket clears
+    // ITSELF on success (onExecuted), which changes resetKey in the very cycle
+    // the receipt is set — so clearing on resetKey wiped it instantly. The
+    // receipt is cleared when the next order is confirmed, so it stays on
+    // screen until the user actually does something else.
   }, [resetKey]);
 
   // Every deal shape needs the CURRENT preview at confirm (closes get side/qty
@@ -197,7 +202,10 @@ export function ExecuteControl({
     if (!deal) return; // unmappable shape — the button was disabled anyway
     // `b` is OMITTED for a single leg, not set to null — hence ?? null.
     restingOnlyRef.current = (deal.b ?? null) === null && deal.execution === 'maker';
-    setPlacedResting(false);
+    placedSummaryRef.current = restingOnlyRef.current
+      ? `${deal.a.side} ${deal.qty} ${parseSymbol(deal.a.symbol).base} @ ${deal.price}`
+      : null;
+    setPlacedResting(null);
     execute.mutate(deal);
   };
 
@@ -226,8 +234,23 @@ export function ExecuteControl({
         )}
       </HoldToConfirmButton>
       {placedResting && (
-        <div role="status" className="mt-1 text-[11px] text-emerald-400">
-          Limit order placed — it rests until filled. See Open Orders.
+        <div
+          role="status"
+          className="mt-1 flex items-start justify-between gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1.5 text-[11px] text-emerald-300"
+        >
+          <span>
+            <span className="font-medium">Limit order placed.</span>{' '}
+            <span className="num">{placedResting}</span> is resting on the venue until it fills —
+            see Open Orders.
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            className="px-1 leading-none text-emerald-400/70 transition-colors hover:text-emerald-200"
+            onClick={() => setPlacedResting(null)}
+          >
+            ×
+          </button>
         </div>
       )}
       {marginBlocked && (
