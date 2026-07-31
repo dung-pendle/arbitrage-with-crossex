@@ -295,6 +295,11 @@ export function SingleTicket() {
       <ExecuteControl
         scope="ticket-single"
         actions={action ? [action] : null}
+        // No Review card: the ticket already shows the ref price, fill
+        // estimate, fees and violations right above this button, so hovering
+        // popped a floating copy of what was already on screen. (Execute
+        // errors still open it — same as the pair ticket and close popover.)
+        hoverCard={false}
         tone={side === 'BUY' ? 'green' : 'red'}
         label="Execute now ▸"
         buttonClassName="w-full"

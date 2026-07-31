@@ -259,3 +259,24 @@ describe('SingleTicket', () => {
     expect(price).toHaveValue('61718'); // re-ceiled from the raw 61717.6
   });
 });
+
+describe('no Review card on a single order', () => {
+  // The ticket already shows ref price, fill estimate, fees and violations
+  // directly above the button, so hovering Execute popped a floating copy of
+  // what was already on screen.
+  it('hovering Execute does not open a Review card', async () => {
+    server.use(...baseHandlers(), ...btcSymbolHandlers(), echoPreviewHandler());
+    renderWithClient(<SingleTicket />);
+    await pickBinanceBtc();
+    await userEvent.type(screen.getByPlaceholderText(/notional/), '500');
+
+    const execute = await screen.findByRole('button', { name: /Execute now/ });
+    await userEvent.hover(execute);
+
+    // The card is a portalled tooltip titled "Review".
+    await waitFor(() => expect(screen.queryByText('Review')).toBeNull());
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    // The inline preview is still there — nothing was lost by removing it.
+    expect(await screen.findByText(/est fee/)).toBeInTheDocument();
+  });
+});
