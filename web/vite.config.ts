@@ -100,10 +100,15 @@ export default defineConfig(({ mode }) => ({
   plugins: [react(), ...(mode === 'landing' ? [landingHtml()] : [])],
   define: mode === 'landing' ? { 'import.meta.env.VITE_LANDING': JSON.stringify('1') } : {},
   server: {
-    port: 8711,
+    // Both overridable so a dev stack can run BESIDE the installed app instead
+    // of fighting it for 6688. PORT drives the proxy target too: with a
+    // hardcoded target, `PORT=7777 yarn dev` would start a dev API on 7777
+    // while this UI kept driving the INSTALLED app on 6688 — i.e. your real
+    // money, from a dev build. One variable keeps the two ends together.
+    port: Number(process.env.WEB_PORT ?? 8711),
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:6688',
+        target: `http://127.0.0.1:${process.env.PORT ?? 6688}`,
         changeOrigin: false,
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyReq) => {
