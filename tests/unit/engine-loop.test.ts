@@ -992,3 +992,80 @@ describe('recovery is the loop', () => {
     expect(fxStr(bTrue)).toBe('0.152');
   });
 });
+
+describe('venue statuses the decoder has not met', () => {
+  // Live case (2026-07-31): CrossEx answered "FAIL" (label
+  // NOT_BEST_ACCOUNT_ROUTER, "all trading channels are currently busy"). The
+  // decoder knew FAILED but not FAIL, so a dead order quarantined and froze
+  // its pair, and Stop could never finish it.
+  it('decodes FAIL as terminal, like REJECT/REJECTED', async () => {
+    const w = mkWorld();
+    await stepChecked(w);
+    const maker = w.venue.liveOrder(A_CONTRACT)!;
+    w.venue.setRawStatus(maker.clientText, 'FAIL');
+    await stepChecked(w, 2);
+
+    const o = w.store.listOrders(w.pairId).find((x) => x.leg === 'A')!;
+    expect(o.quarantinedStatus).toBeNull(); // NOT frozen
+    expect(o.state).toBe('CLOSED');
+    // 'rejected:', never 'cancelled' — the latter reads as a user STOP and
+    // would permanently relinquish the acquisition.
+    expect(o.closeReason).toMatch(/^rejected:/);
+  });
+
+  it("keeps the venue's own reason so the UI can explain the rejection", async () => {
+    const w = mkWorld();
+    await stepChecked(w);
+    const maker = w.venue.liveOrder(A_CONTRACT)!;
+    const reason = '{"label":"NOT_BEST_ACCOUNT_ROUTER","message":"All trading channels are busy."}';
+    w.venue.orders.get(maker.clientText)!.reason = reason;
+    w.venue.setRawStatus(maker.clientText, 'FAIL');
+    await stepChecked(w, 2);
+
+    expect(w.store.listOrders(w.pairId).find((x) => x.leg === 'A')!.venueReason).toBe(reason);
+  });
+
+  // The general escape hatch: a status that stays unclassifiable forever used
+  // to wedge the deal, because quarantine only clears on a LATER known status.
+  // Stop spun on "settling what filled" indefinitely.
+  it('Stop finishes a deal frozen on a status that never resolves', async () => {
+    const w = mkWorld();
+    await stepChecked(w);
+    const maker = w.venue.liveOrder(A_CONTRACT)!;
+    w.venue.setRawStatus(maker.clientText, 'WAT'); // venue will keep saying this
+    await stepChecked(w, 2);
+
+    const frozen = w.store.listOrders(w.pairId).find((x) => x.leg === 'A')!;
+    expect(frozen.quarantinedStatus).toBe('WAT');
+    expect(w.store.getPair(w.pairId)!.mode).toBe('OPENING');
+
+    commands.stop(w.store, w.pairId);
+    await stepChecked(w, 4);
+
+    const o = w.store.listOrders(w.pairId).find((x) => x.leg === 'A')!;
+    expect(o.quarantinedStatus).toBeNull();
+    expect(o.state).toBe('CLOSED');
+    expect(o.closeReason).toBe('force-resolved:WAT');
+    // The deal actually settles instead of spinning.
+    expect(w.store.getPair(w.pairId)!.mode).toBe('DONE');
+    assertInvariants(w);
+  });
+
+  it('never abandons a stuck order the venue will not confirm dead', async () => {
+    // If the cancel cannot be confirmed, the order might still be live and
+    // filling: staying frozen is correct, silently closing it is not.
+    const w = mkWorld();
+    await stepChecked(w);
+    const maker = w.venue.liveOrder(A_CONTRACT)!;
+    w.venue.setRawStatus(maker.clientText, 'WAT');
+    await stepChecked(w, 2);
+    w.venue.cancelsFail = true; // venue cannot confirm anything
+
+    commands.stop(w.store, w.pairId);
+    await stepChecked(w, 4);
+
+    const o = w.store.listOrders(w.pairId).find((x) => x.leg === 'A')!;
+    expect(o.quarantinedStatus).toBe('WAT'); // still frozen, on purpose
+    expect(w.store.getPair(w.pairId)!.mode).toBe('STOPPING');
+  });
+});

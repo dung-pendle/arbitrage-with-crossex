@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS orders (
   close_reason TEXT,
   cancel_requested INTEGER NOT NULL DEFAULT 0,
   quarantined_status TEXT,
+  venue_reason TEXT,
   read_fail_streak INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   resolved_at INTEGER,
@@ -106,7 +107,7 @@ interface OrderDbRow {
   kind: string; side: string; qty: string; price: string | null; tif: string;
   state: string; venue_order_id: string | null; cum_qty: string; avg_fill_price: string;
   close_reason: string | null; cancel_requested: number;
-  quarantined_status: string | null; read_fail_streak: number;
+  quarantined_status: string | null; venue_reason: string | null; read_fail_streak: number;
   created_at: number; resolved_at: number | null;
 }
 
@@ -170,6 +171,7 @@ function toOrder(r: OrderDbRow): OrderRow {
     closeReason: r.close_reason,
     cancelRequested: (r.cancel_requested ? 1 : 0) as 0 | 1,
     quarantinedStatus: r.quarantined_status,
+    venueReason: r.venue_reason,
     readFailStreak: r.read_fail_streak ?? 0,
     createdAt: r.created_at,
     resolvedAt: r.resolved_at,
@@ -198,6 +200,7 @@ export interface OrderPatch {
   closeReason?: string | null;
   cancelRequested?: 0 | 1;
   quarantinedStatus?: string | null;
+  venueReason?: string | null;
   readFailStreak?: number;
   resolvedAt?: number | null;
 }
@@ -223,6 +226,7 @@ const ORDER_COLS: Record<keyof OrderPatch, string> = {
   closeReason: 'close_reason',
   cancelRequested: 'cancel_requested',
   quarantinedStatus: 'quarantined_status',
+  venueReason: 'venue_reason',
   readFailStreak: 'read_fail_streak',
   resolvedAt: 'resolved_at',
 };
@@ -251,6 +255,9 @@ export class Store {
     const cols = this.db.prepare(`PRAGMA table_info(orders)`).all() as unknown as { name: string }[];
     if (!cols.some((c) => c.name === 'avg_fill_price')) {
       this.db.exec(`ALTER TABLE orders ADD COLUMN avg_fill_price TEXT NOT NULL DEFAULT '0'`);
+    }
+    if (!cols.some((c) => c.name === 'venue_reason')) {
+      this.db.exec(`ALTER TABLE orders ADD COLUMN venue_reason TEXT`);
     }
     if (!cols.some((c) => c.name === 'read_fail_streak')) {
       this.db.exec(`ALTER TABLE orders ADD COLUMN read_fail_streak INTEGER NOT NULL DEFAULT 0`);
@@ -357,6 +364,7 @@ export class Store {
         closeReason: null,
         cancelRequested: 0,
         quarantinedStatus: null,
+        venueReason: null,
         createdAt: o.now,
         resolvedAt: null,
       };

@@ -126,7 +126,12 @@ export class FakeVenue implements VenuePort {
    * FIX B.1.c race: fills legally land while a cancel is in flight. */
   nextCancelRace: number[] = [];
 
+  /** The venue cannot confirm cancels (outage). A cancel that is not confirmed
+   * proves nothing, so the engine must keep treating the order as possibly live. */
+  cancelsFail = false;
+
   async cancel(ref: { venueOrderId?: string; clientText: string }): Promise<CancelOutcome> {
+    if (this.cancelsFail) return { kind: 'unknown', message: 'venue unreachable' };
     const o = this.byRef(ref);
     if (!o) return { kind: 'ok' }; // not found = already terminal = success
     if (o.rawStatus === 'NEW' || o.rawStatus === 'OPEN') {

@@ -33,6 +33,7 @@ export function project(pair: PairRow, orders: OrderRow[]): Projection {
   let makerOrder: OrderRow | null = null;
   let anyPending = false;
   let anyQuarantined = false;
+  let quarantinedOrder: OrderRow | null = null;
 
   for (const o of orders) {
     const cum = fx(o.cumQty);
@@ -47,7 +48,10 @@ export function project(pair: PairRow, orders: OrderRow[]): Projection {
       bReserved += reserved;
     }
     if (o.state === 'PENDING') anyPending = true;
-    if (o.quarantinedStatus) anyQuarantined = true;
+    if (o.quarantinedStatus) {
+      anyQuarantined = true;
+      quarantinedOrder ??= o;
+    }
   }
 
   const target = fx(pair.targetQty);
@@ -61,6 +65,7 @@ export function project(pair: PairRow, orders: OrderRow[]): Projection {
     makerOrder,
     anyPending,
     anyQuarantined,
+    quarantinedOrder,
     allSettled:
       !anyPending &&
       !anyQuarantined &&
@@ -202,6 +207,17 @@ export function decide(pair: PairRow, p: Projection, now: number, ctx: DecideCtx
     if (pair.mode === 'OPENING' && m.state === 'OPEN' && (p.anyPending || p.anyQuarantined)) {
       return { type: 'cancel', order: m };
     }
+  }
+
+  // A quarantine freezes the pair until a LATER read returns a status we know,
+  // which a venue that already answered with an unknown string may never do.
+  // So a user who asked to get out (Stop, or a halted pair) would wait forever
+  // on "settling what filled". Keep cancelling the stuck order: performCancel
+  // treats a confirmed cancel ('no further fills can land') as licence to close
+  // it out, which is the only thing that can unfreeze the pair. Deliberately
+  // NOT gated on cancelRequested — the first cancel is what got us here.
+  if (p.quarantinedOrder && (pair.mode === 'STOPPING' || pair.mode === 'HALTED')) {
+    return { type: 'cancel', order: p.quarantinedOrder };
   }
 
   // FREEZE: never PLACE (acquire/hedge) while any order's fate is unresolved —

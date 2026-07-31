@@ -29,6 +29,22 @@ const MODE_TONE: Record<DealPair['mode'], string> = {
   DONE: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300',
 };
 
+/** The venue's reason arrives as its raw JSON ({"label":…,"message":…}) or as
+ * plain text. Show the human half; a rejection the user cannot read is a
+ * support ticket. */
+function venueReasonText(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const j = JSON.parse(raw) as { label?: unknown; message?: unknown };
+    const label = typeof j.label === 'string' ? j.label : '';
+    const message = typeof j.message === 'string' ? j.message : '';
+    const text = [label, message].filter(Boolean).join(' — ');
+    return text || raw;
+  } catch {
+    return raw;
+  }
+}
+
 const ORDER_STATE_TONE: Record<DealOrder['state'], string> = {
   PENDING: 'text-amber-300',
   OPEN: 'text-cyan-300',
@@ -131,6 +147,9 @@ export function DealModal({ dealId, onClose }: { dealId: string; onClose: () => 
   const report: DealReport | null = pair?.reportJson ? (JSON.parse(pair.reportJson) as DealReport) : null;
   const slip = pair ? dealSlippage(pair, report) : null;
   const anyCmdPending = convert.isPending || repeg.isPending || stop.isPending || resume.isPending;
+  const cmdError = (convert.error ?? repeg.error ?? stop.error ?? resume.error) as
+    | { message: string; hint?: string }
+    | null;
   // Custom re-peg price (the route takes an optional body price; without one it
   // re-pegs to the fresh touch).
   const [customPx, setCustomPx] = useState('');
@@ -202,6 +221,15 @@ export function DealModal({ dealId, onClose }: { dealId: string; onClose: () => 
                 }
                 residualQty={proj.residualA}
               />
+            )}
+
+            {/* A failed command used to do NOTHING visible: the mutation has no
+                error path, so a rejected Stop looked like a dead button. */}
+            {cmdError && (
+              <p role="alert" className="text-[12px] text-rose-300">
+                {cmdError.message}
+                {cmdError.hint ? <span className="text-ink-400"> {cmdError.hint}</span> : null}
+              </p>
             )}
 
             {/* Controls */}
@@ -307,6 +335,11 @@ export function DealModal({ dealId, onClose }: { dealId: string; onClose: () => 
                         <td className={`px-2 py-1 ${ORDER_STATE_TONE[o.state]}`}>
                           {o.state.toLowerCase()}
                           {o.closeReason ? <span className="text-ink-500"> · {o.closeReason}</span> : ''}
+                          {o.venueReason ? (
+                            <div className="mt-0.5 max-w-[46ch] whitespace-normal text-[11px] leading-snug text-ink-400">
+                              {venueReasonText(o.venueReason)}
+                            </div>
+                          ) : null}
                           {o.quarantinedStatus ? (
                             <span className="text-amber-400"> · “{o.quarantinedStatus}”</span>
                           ) : (

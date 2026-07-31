@@ -38,8 +38,12 @@ export interface LoopDeps {
 // never guessed terminal or non-terminal (hazard 11).
 // Live-verified CrossEx states (2026-07-23 smoke): OPEN, CANCELLED, REJECT —
 // note "REJECT" without the -ED (a would-cross POC lands in state REJECT).
+// Same shortening applies to FAIL: CrossEx returned state "FAIL" with label
+// NOT_BEST_ACCOUNT_ROUTER (live, 2026-07-31) and the anchored FAILED alone did
+// not match, so a dead order quarantined and froze its pair. closeReasonOf has
+// always matched /REJECT|FAIL/ — the two halves must agree.
 const OPENISH = /^(NEW|OPEN|LIVE|PENDING|ACTIVE|CREATED|ACCEPTED|PARTIAL(LY)?[-_ ]?FILL(ED)?)$/i;
-const CLOSEDISH = /^(FILLED|FINISHED|CLOSED|DONE|CANCELL?ED|EXPIRED|REJECT(ED)?|FAILED|IOC_?CANCELL?ED)$/i;
+const CLOSEDISH = /^(FILLED|FINISHED|CLOSED|DONE|CANCELL?ED|EXPIRED|REJECT(ED)?|FAIL(ED)?|IOC_?CANCELL?ED)$/i;
 
 function decodeStatus(raw: string): 'open' | 'closed' | 'unknown' {
   const s = raw.trim();
@@ -115,13 +119,18 @@ function applySnapshot(deps: LoopDeps, pair: PairRow, o: OrderRow, snap: OrderSn
     patch.avgFillPrice = snap.avgFillPrice;
   }
 
+  // Keep the venue's own explanation for the UI: a status alone ("FAIL") tells
+  // the user nothing, while the reason ("all trading channels are currently
+  // busy…") tells them whether to retry, resize, or switch venue.
+  if (snap.reason && snap.reason !== o.venueReason) patch.venueReason = snap.reason;
+
   const decoded = decodeStatus(snap.rawStatus);
   if (decoded === 'unknown') {
     patch.quarantinedStatus = snap.rawStatus;
     deps.store.alert(
       'warn',
       pair.id,
-      `unclassifiable venue status "${snap.rawStatus}" on ${o.clientId} — frozen until it resolves`,
+      `unclassifiable venue status "${snap.rawStatus}" on ${o.clientId} — frozen until it resolves${snap.reason ? ` (venue said: ${snap.reason})` : ''}`,
       now,
     );
   } else {
@@ -363,12 +372,53 @@ async function performPlace(
   // pair until the resolution ladder settles it. Nothing is journaled terminal.
 }
 
-async function performCancel(deps: LoopDeps, o: OrderRow): Promise<void> {
+async function performCancel(deps: LoopDeps, pair: PairRow, o: OrderRow): Promise<void> {
   deps.store.updateOrder(o.pairId, o.leg, o.seq, { cancelRequested: 1 });
   // Cancel needs no state machine: "not found / already finished" is success
   // (no further fills can land), an unknown outcome is irrelevant — the loop
   // keeps observing the order until the venue reports a terminal cum.
-  await deps.venue.cancel({ venueOrderId: o.venueOrderId ?? undefined, clientText: o.clientId });
+  const outcome = await deps.venue.cancel({
+    venueOrderId: o.venueOrderId ?? undefined,
+    clientText: o.clientId,
+  });
+
+  // THE WAY OUT OF A QUARANTINE. An unclassifiable status freezes the pair, and
+  // quarantine only clears when a LATER read returns a status we know — which a
+  // venue that already answered with an unknown string will never do. So the
+  // deal sits frozen forever and Stop cannot finish it.
+  //
+  // A cancel answering 'ok' is the proof that breaks the deadlock: it means
+  // canceled, or already terminal/not found, i.e. NO FURTHER FILLS CAN LAND.
+  // Take one more read first so we close on the freshest cum the venue will
+  // give us (finalizing on a stale cum would under-count fills and leave the
+  // hedge short), then close the order out and let the pair settle honestly.
+  // ONLY when the user asked to get out. During OPENING the engine cancels a
+  // resting maker precisely BECAUSE something is quarantined (protecting the
+  // unhedged side); force-resolving there would destroy the freeze the cancel
+  // exists to honour, and let the deal keep trading on a status we cannot read.
+  if (pair.mode !== 'STOPPING' && pair.mode !== 'HALTED') return;
+  if (outcome.kind !== 'ok' || !o.quarantinedStatus) return;
+  const read = await deps.venue.getOrder({
+    venueOrderId: o.venueOrderId ?? undefined,
+    clientText: o.clientId,
+  });
+  if (read.kind === 'found') applySnapshot(deps, pair, o, read.snapshot);
+  const fresh = deps.store.listOrders(o.pairId).find((x) => x.leg === o.leg && x.seq === o.seq) ?? o;
+  if (fresh.state === 'CLOSED' || !fresh.quarantinedStatus) return; // it resolved itself
+  deps.store.updateOrder(o.pairId, o.leg, o.seq, {
+    state: 'CLOSED',
+    // NOT 'cancelled': that spelling means "the user killed it on the venue"
+    // and would be decoded as an explicit STOP (decide.ts).
+    closeReason: `force-resolved:${fresh.quarantinedStatus}`,
+    quarantinedStatus: null,
+    resolvedAt: deps.clock.now(),
+  });
+  deps.store.alert(
+    'warn',
+    pair.id,
+    `${o.clientId} stayed unclassifiable ("${fresh.quarantinedStatus}"), but the venue confirmed the cancel — closing it out at ${fresh.cumQty} filled so the deal can settle`,
+    deps.clock.now(),
+  );
 }
 
 async function perform(deps: LoopDeps, pair: PairRow, action: Action): Promise<void> {
@@ -382,7 +432,7 @@ async function perform(deps: LoopDeps, pair: PairRow, action: Action): Promise<v
       });
       return;
     case 'cancel':
-      return performCancel(deps, action.order);
+      return performCancel(deps, pair, action.order);
     case 'place':
       return performPlace(deps, pair, action);
     case 'finish': {

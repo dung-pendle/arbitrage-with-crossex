@@ -89,6 +89,7 @@ describe('DealModal', () => {
             closeReason: null,
             cancelRequested: 0,
             quarantinedStatus: null,
+    venueReason: null,
             createdAt: Date.now(),
             resolvedAt: null,
           },

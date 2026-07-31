@@ -49,6 +49,7 @@ function order(over: Partial<OrderRow>): OrderRow {
     closeReason: null,
     cancelRequested: 0,
     quarantinedStatus: null,
+    venueReason: null,
     readFailStreak: 0,
     createdAt: 0,
     resolvedAt: null,

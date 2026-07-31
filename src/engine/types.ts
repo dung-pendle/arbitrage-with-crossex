@@ -86,6 +86,10 @@ export interface OrderRow {
   cancelRequested: 0 | 1;
   /** Raw venue status string the open-world decoder could not classify. */
   quarantinedStatus: string | null;
+  /** The venue's own explanation for the last status it reported (label +
+   * message). A status alone ("FAIL") tells the user nothing; this is what
+   * says whether to retry, resize, or switch venue. */
+  venueReason: string | null;
   /** Consecutive failed venue reads on this order (reset by any successful one).
    * A read failure resolves nothing, so a persistent one silently freezes our
    * view of a live order while it keeps filling — this makes that visible. */
@@ -187,6 +191,9 @@ export interface Projection {
   makerOrder: OrderRow | null;
   anyPending: boolean;
   anyQuarantined: boolean;
+  /** The first order stuck on a status the decoder cannot classify (any leg).
+   * Stop / a halted pair cancels THIS to break the freeze — see decide(). */
+  quarantinedOrder: OrderRow | null;
   /** Every order in a settled state (nothing PENDING/OPEN/quarantined). */
   allSettled: boolean;
 }

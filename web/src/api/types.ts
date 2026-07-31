@@ -794,6 +794,8 @@ export interface DealOrder {
   closeReason: string | null;
   cancelRequested: 0 | 1;
   quarantinedStatus: string | null;
+  /** The venue's own explanation for the last status it reported. */
+  venueReason: string | null;
   createdAt: number;
   resolvedAt: number | null;
 }
