@@ -11,7 +11,7 @@ import { FreshnessButton } from '../components/FreshnessIndicator';
 import { SignedNumber } from '../components/SignedNumber';
 import { fmtPct, fmtUsd } from '../lib/fmt';
 import { readJson } from '../lib/storage';
-import { applyExitCost, type ExitFlags } from './strategyMath';
+import { applyCostFlags, type CostFlags } from './strategyMath';
 
 export const STRATEGY_STORAGE_KEY = 'crossex.strategy.v1';
 export const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -135,7 +135,7 @@ export function StrategyFreshness({
 /** Compact totals strip shown when the address runs more than one strategy.
  * Covers the Boros-tracked strategies only — perp-only boxes are not in the
  * server totals. Exit parts re-derived per the checked flags. */
-const FLAGS_ON: ExitFlags = { inclExitFees: true, inclExitSlippage: true };
+const FLAGS_ON: CostFlags = { inclExitFees: true, inclExitSlippage: true, inclEntryCost: true };
 
 export function TotalsStrip({ data }: { data: StrategyReturns }) {
   const flags = FLAGS_ON; // totals always include known future exit costs
@@ -144,10 +144,14 @@ export function TotalsStrip({ data }: { data: StrategyReturns }) {
     totals.capitalUsd > 0
       ? strategies.reduce((s, x) => s + x.capitalUsd * (x.elapsedSeconds ?? 0), 0) / totals.capitalUsd
       : null;
-  const { expectedUsd } = applyExitCost({
+  const { expectedUsd } = applyCostFlags({
     flags,
     perpExitFeesUsd: totals.perpExitFeesTotalUsd,
     perpExitSlippageUsd: totals.perpExitSlippageTotalUsd,
+    // The totals payload carries no PAID perp entry breakdown, and it never
+    // needs one: the entry cost is always included here, so the add-back is 0.
+    perpEntryFeesUsd: 0,
+    perpEntrySlippageUsd: null,
     realizedPnlUsd: totals.realizedPnlUsd,
     realizedApr: totals.realizedApr,
     expectedPnlToMaturityUsd: totals.expectedPnlToMaturityUsd,

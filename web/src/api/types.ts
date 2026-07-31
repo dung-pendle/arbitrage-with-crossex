@@ -340,6 +340,11 @@ export type EntryMode = 'both-market' | 'maker-hedge';
 /** Whether the perps are closed at maturity or rolled into the next cohort. */
 export type ExitMode = 'close' | 'roll';
 
+/** Whether a live strategy is charged the perp entry cost it paid, or not —
+ * a perp rolled into this maturity paid its fees and crossed its spread in a
+ * previous life. Client-side display only; the server never sees it. */
+export type EntryCostMode = 'include' | 'omit';
+
 /** Why a market's exec APRs are what they are — drives the per-row badge. */
 export type BookStatus = 'ok' | 'insufficient-depth' | 'unavailable' | 'not-fetched';
 

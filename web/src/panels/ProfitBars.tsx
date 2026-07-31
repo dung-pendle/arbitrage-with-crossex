@@ -12,9 +12,10 @@
  * decrements are solid amber; future decrements are low-alpha amber with a
  * dashed outline (pattern, not colour alone); favorable (negative) costs step
  * UP in emerald; settled income is cyan, unrealized Boros MtM dashed cyan.
- * Every component carries its amount as a label. The left builder mirrors
- * strategyMath.applyExitCost's gates EXACTLY and the right builder sums the
- * legs the server summed, so each chart's running level lands on its
+ * Every component carries its amount as a label. Both builders mirror
+ * strategyMath.applyCostFlags's gates EXACTLY — the left one for the exit
+ * parts, both of them for the entry parts — and the right one otherwise sums
+ * the legs the server summed, so each chart's running level lands on its
  * authoritative total by construction. The whole block collapses behind the
  * card's "Profit by maturity" box (chartsOpen).
  */
@@ -30,7 +31,7 @@ import {
   type WaterfallStep as Step,
 } from '../components/Waterfall';
 import { fmtUsd } from '../lib/fmt';
-import type { ExitFlags } from './strategyMath';
+import type { CostFlags } from './strategyMath';
 
 const TITLES: Record<string, string> = {
   'paid-perp-fees': 'Perp trading fees paid',
@@ -53,29 +54,41 @@ export function ProfitBars({
 }: {
   /** Gross full-life spread return (null = clock unknown → nothing renders). */
   spreadReturnUsd: number | null;
-  /** Profit by maturity net of the CHECKED exit parts (applyExitCost). */
+  /** Profit by maturity under the chosen cost assumptions (applyCostFlags). */
   profitUsd: number | null;
-  /** The CURRENT NET P&L (Σ leg nets − entry slippage = realizedPnlUsd) — the
-   * exit checkboxes never touch this line; they are future costs and only
-   * shape the profit-by-maturity target. */
+  /** The CURRENT NET P&L (applyCostFlags's currentNetUsd) — the exit toggle never
+   * touches this line (those are future costs, and only shape the
+   * profit-by-maturity target), but the entry toggle does: an omitted entry
+   * cost is money this strategy never spent. */
   mtmUsd: number;
   /** The strategy legs — source of the "now" waterfall's component sums. */
   legs: StrategyLeg[];
   fees: StrategyFees;
-  /** Gates the exit columns (the header checkboxes own the state). */
-  flags: ExitFlags;
+  /** Gates the exit and entry columns (the card's toggles own the state). */
+  flags: CostFlags;
   /** Collapse toggle (the card's "Profit by maturity" box drives it). */
   chartsOpen?: boolean;
 }) {
   const { paid, future } = fees;
 
   // --- LEFT: profit-by-maturity steps -------------------------------------------
-  // Signed cost rows in decrement order. The gates mirror applyExitCost: exit
+  // Signed cost rows in decrement order. The gates mirror applyCostFlags: exit
   // FEES only when checked and > 0; exit SLIPPAGE when checked and non-null
-  // (signed — a favorable value steps UP). Zero/null rows are skipped.
+  // (signed — a favorable value steps UP); both ENTRY parts only when this
+  // strategy is charged them at all. Zero/null rows are skipped.
   const costRows: Array<[string, number | null, string, string]> = [
-    ['paid-perp-fees', paid.perpTradingUsd, 'bg-amber-500', 'Perp entry fees'],
-    ['paid-entry-slippage', paid.perpEntrySlippageUsd, 'bg-amber-500/75', 'Entry slip'],
+    [
+      'paid-perp-fees',
+      flags.inclEntryCost ? paid.perpTradingUsd : null,
+      'bg-amber-500',
+      'Perp entry fees',
+    ],
+    [
+      'paid-entry-slippage',
+      flags.inclEntryCost ? paid.perpEntrySlippageUsd : null,
+      'bg-amber-500/75',
+      'Entry slip',
+    ],
     ['paid-boros-trade', paid.borosTradeUsd, 'bg-amber-500/55', 'Boros trade fees'],
     ['paid-boros-settle', paid.borosSettlementUsd, 'bg-amber-500/40', 'Settlement fees paid'],
     ['future-boros-settle', future.borosSettlementUsd, dashed, 'Settlement fees →mat'],
@@ -163,7 +176,7 @@ export function ProfitBars({
   const nowRows: Array<[string, number, string, string, string, string]> = [
     [
       'now-perp-entry',
-      -perpFeesUsd,
+      flags.inclEntryCost ? -perpFeesUsd : 0,
       'bg-emerald-500/80',
       'bg-amber-500',
       'Perp trading fees paid',
@@ -171,7 +184,7 @@ export function ProfitBars({
     ],
     [
       'now-entry-slip',
-      -(paid.perpEntrySlippageUsd ?? 0),
+      flags.inclEntryCost ? -(paid.perpEntrySlippageUsd ?? 0) : 0,
       'bg-emerald-500/80',
       'bg-amber-500/75',
       'Perp entry slippage paid',

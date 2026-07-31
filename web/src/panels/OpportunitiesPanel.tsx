@@ -76,7 +76,7 @@ const ENTRY_MODE_LABEL: Record<EntryMode, string> = {
 };
 
 const EXIT_MODE_LABEL: Record<ExitMode, string> = {
-  close: 'Close',
+  close: 'Close positions',
   roll: 'Roll over',
 };
 
@@ -855,7 +855,7 @@ export function OpportunitiesPanel({ unconfigured = false }: { unconfigured?: bo
           </div>
 
           <div className="flex flex-col items-start gap-1.5">
-            <div className={microLabelClass}>At maturity</div>
+            <div className={microLabelClass}>Perp exit cost</div>
             <SegmentedToggle<ExitMode>
               className="seg-cyan"
               ariaLabel="Perp legs at maturity"
@@ -869,7 +869,9 @@ export function OpportunitiesPanel({ unconfigured = false }: { unconfigured?: bo
                 { value: 'roll', label: EXIT_MODE_LABEL.roll },
               ]}
             />
-            <span className="text-[10.5px] text-ink-400">no exit cost</span>
+            {/* Only under "Roll over" — beneath a "Perp exit cost" label with
+                "Close positions" picked, it reads as a flat contradiction. */}
+            {exitMode === 'roll' && <span className="text-[10.5px] text-ink-400">no exit cost</span>}
           </div>
 
           <div className="flex flex-col items-start gap-1.5">

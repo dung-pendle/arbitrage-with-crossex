@@ -10,12 +10,19 @@
  * Purely prop-driven — PositionsHome owns the queries.
  */
 import { useState } from 'react';
-import type { CrossexPosition, ExitMode, StrategyLeg, StrategyRollup } from '../api/types';
+import type {
+  CrossexPosition,
+  EntryCostMode,
+  ExitMode,
+  StrategyLeg,
+  StrategyRollup,
+} from '../api/types';
 import { Chip } from '../components/Chip';
 import { DataTable, type Column } from '../components/DataTable';
 import { Notes } from '../components/Notes';
 import { SignedNumber } from '../components/SignedNumber';
 import { Stat } from '../components/Stat';
+import { microLabelClass } from '../components/Th';
 import { SideChip, VenueChip } from '../components/VenueChip';
 import {
   fmtAge,
@@ -34,7 +41,7 @@ import { SegmentedToggle } from '../components/SegmentedToggle';
 import { TimelineClockEdit } from './HomeControls';
 import { PerpLegExpanded } from './PerpLegExpanded';
 import { ProfitBars } from './ProfitBars';
-import { applyExitCost, SECONDS_IN_YEAR, type ExitFlags } from './strategyMath';
+import { applyCostFlags, SECONDS_IN_YEAR, type CostFlags } from './strategyMath';
 
 function HedgeChip({ s }: { s: StrategyRollup }) {
   if (s.secondsToMaturity === 0) return <Chip sm title="The Boros legs have matured">matured</Chip>;
@@ -119,16 +126,25 @@ export function StrategyCard({
   // costs charged. The profit formula includes future costs, so close is the
   // default.
   const [exitMode, setExitMode] = useState<ExitMode>('close');
-  const flags: ExitFlags =
-    exitMode === 'close'
-      ? { inclExitFees: true, inclExitSlippage: true }
-      : { inclExitFees: false, inclExitSlippage: false };
-  // Display-side application of the checked exit parts: the server never
-  // bakes them into any number.
-  const { expectedUsd } = applyExitCost({
+  // Per-position entry assumption. 'omit' says the perps were rolled into this
+  // maturity, so their fees and entry crossing were paid before this strategy
+  // existed — Gate reports the fee cumulatively and the entryPrice from the
+  // original open, so both would otherwise be billed here. Include is the
+  // default: most positions really were opened for this strategy.
+  const [entryMode, setEntryMode] = useState<EntryCostMode>('include');
+  const flags: CostFlags = {
+    inclExitFees: exitMode === 'close',
+    inclExitSlippage: exitMode === 'close',
+    inclEntryCost: entryMode === 'include',
+  };
+  // Display-side application of the cost assumptions: the server never bakes
+  // the exit parts into any number, and always bakes the entry parts in.
+  const { expectedUsd, currentNetUsd } = applyCostFlags({
     flags,
     perpExitFeesUsd: s.feesUsd.future.perpExitFeesUsd,
     perpExitSlippageUsd: s.feesUsd.future.perpExitSlippageUsd,
+    perpEntryFeesUsd: s.feesUsd.paid.perpTradingUsd,
+    perpEntrySlippageUsd: s.feesUsd.paid.perpEntrySlippageUsd,
     realizedPnlUsd: s.realizedPnlUsd,
     realizedApr: s.realizedApr,
     expectedPnlToMaturityUsd: s.expectedPnlToMaturityUsd,
@@ -510,7 +526,7 @@ export function StrategyCard({
               —
             </span>
           ) : (
-            <span title="The PnL expected by maturity as a return on the capital this strategy posts, annualized over the full trade life (start → maturity). Net of every cost, and it follows the Close / Roll assumption below.">
+            <span title="The PnL expected by maturity as a return on the capital this strategy posts, annualized over the full trade life (start → maturity). Net of every cost, and it follows the perp entry and exit cost assumptions below.">
               <SignedNumber value={fixedAprOnCapital} format={(n) => fmtPct(n)} />
             </span>
           )}
@@ -534,8 +550,14 @@ export function StrategyCard({
           )}
         </Stat>
           <Stat label="Current PnL">
-            <span title="Funding + Boros settlements & rate MtM − fees − entry slippage — the waterfalls below break it down">
-              <SignedNumber value={s.realizedPnlUsd} format={(n) => fmtUsd(n, 0)} className="font-medium" />
+            <span
+              title={
+                flags.inclEntryCost
+                  ? 'Funding + Boros settlements & rate MtM − fees − entry slippage — the waterfalls below break it down'
+                  : 'Funding + Boros settlements & rate MtM − Boros fees. The perp entry fees and entry slippage are not charged (rolled over) — the waterfalls below break it down'
+              }
+            >
+              <SignedNumber value={currentNetUsd} format={(n) => fmtUsd(n, 0)} className="font-medium" />
             </span>
           </Stat>
           </div>
@@ -573,10 +595,11 @@ export function StrategyCard({
             <ProfitBars
               spreadReturnUsd={s.spreadReturnUsd}
               profitUsd={expectedUsd}
-              // "now" is the CURRENT NET (Σ leg nets − entry slippage) — the
-              // exit checkboxes only shape the TARGET; they are future costs,
-              // not money already made or lost.
-              mtmUsd={s.realizedPnlUsd}
+              // "now" is the CURRENT NET — the exit toggle only shapes the
+              // TARGET (those are future costs, not money already made or
+              // lost), but the entry toggle moves this line too: an omitted
+              // entry cost is money this strategy never spent.
+              mtmUsd={currentNetUsd}
               legs={s.legs}
               fees={s.feesUsd}
               flags={flags}
@@ -596,20 +619,39 @@ export function StrategyCard({
         </button>
       </div>
 
-      {/* The PER-POSITION exit assumption toggle (the spread now lives in the
-          card title). */}
-      <div className="mt-2 flex flex-wrap items-center justify-end gap-x-4 gap-y-1">
+      {/* The PER-POSITION cost assumptions — entry first, in the order the
+          money is spent (the spread now lives in the card title). */}
+      <div className="mt-2 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
         <span
+          className="flex items-center gap-1.5"
           title={
-            'Close perp at maturity: folds this position’s estimated exit costs into its profit numbers — assumes a maker+hedge close (maker on one leg, taker hedge on the other, cheapest assignment) and exit slippage equal to the entry slippage. Roll over: the perp legs stay open past maturity — no exit costs are charged.'
+            'Include: this strategy is charged the perp entry fees and entry slippage it actually paid. Omit (rolled over): the perp legs were rolled into this maturity, so their fees and entry crossing were paid before this strategy started — Gate reports the fee cumulatively and the entry price from the original open, so both would otherwise be billed here. Omitting moves Current PnL as well as the projection.'
           }
         >
+          <span className={microLabelClass}>Perp entry cost</span>
+          <SegmentedToggle<EntryCostMode>
+            ariaLabel="Perp entry cost"
+            value={entryMode}
+            onChange={setEntryMode}
+            options={[
+              { value: 'include', label: 'Include' },
+              { value: 'omit', label: 'Omit (rolled over)' },
+            ]}
+          />
+        </span>
+        <span
+          className="flex items-center gap-1.5"
+          title={
+            'Close positions: folds this position’s estimated exit costs into its profit numbers — assumes a maker+hedge close (maker on one leg, taker hedge on the other, cheapest assignment) and exit slippage equal to the entry slippage. Roll over: the perp legs stay open past maturity — no exit costs are charged.'
+          }
+        >
+          <span className={microLabelClass}>Perp exit cost</span>
           <SegmentedToggle<ExitMode>
             ariaLabel="Perp legs at maturity"
             value={exitMode}
             onChange={setExitMode}
             options={[
-              { value: 'close', label: 'Close perp at maturity' },
+              { value: 'close', label: 'Close positions' },
               { value: 'roll', label: 'Roll over' },
             ]}
           />

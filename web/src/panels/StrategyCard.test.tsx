@@ -14,9 +14,14 @@ import { StrategyCard } from './StrategyCard';
 /** Charts default collapsed — open them via the See-more tab below the box. */
 const openDetails = () => fireEvent.click(screen.getByRole('button', { name: /see more/ }));
 
-/** The exit toggle defaults to 'Close perp at maturity' — flip a rendered
- * card to Roll over (no exit costs charged). */
+/** The exit toggle defaults to 'Close positions' — flip a rendered card to
+ * Roll over (no exit costs charged). */
 const rollOver = () => fireEvent.click(screen.getByRole('radio', { name: 'Roll over' }));
+
+/** The entry toggle defaults to 'Include' — flip a rendered card to Omit, i.e.
+ * the perps were rolled into this maturity and paid their entry beforehand. */
+const omitEntry = () =>
+  fireEvent.click(screen.getByRole('radio', { name: 'Omit (rolled over)' }));
 
 const card = (
   over: Parameters<typeof makeStrategyRollup>[0] = {},
@@ -66,7 +71,7 @@ describe('StrategyCard — hero tiers', () => {
   });
 
   it('folds the checked exit parts into the hero numbers by default', () => {
-    render(card()); // defaults to 'Close perp at maturity' → both exit parts on
+    render(card()); // defaults to 'Close positions' → both exit parts on
     // Profit: 282.22 − (80 + 49.16) = 153.06 → "+$153" (hero + target annotation).
     expect(screen.getAllByText('+$153').length).toBeGreaterThan(0);
     expect(screen.queryByText('+$282')).not.toBeInTheDocument();
@@ -92,9 +97,9 @@ describe('StrategyCard — hero tiers', () => {
     expect(screen.getAllByTitle(/Current PnL/).length).toBeGreaterThan(0);
   });
 
-  it('the per-position Roll over / Close-at-maturity toggle moves the hero profit', async () => {
-    render(card()); // defaults to "Close perp at maturity" → profit +$153
-    expect(screen.getByRole('radio', { name: 'Close perp at maturity' })).toHaveAttribute(
+  it('the per-position Roll over / Close-positions toggle moves the hero profit', async () => {
+    render(card()); // defaults to "Close positions" → profit +$153
+    expect(screen.getByRole('radio', { name: 'Close positions' })).toHaveAttribute(
       'aria-checked',
       'true',
     );
@@ -106,9 +111,9 @@ describe('StrategyCard — hero tiers', () => {
     expect(
       screen.getByTitle(/maker\+hedge close .* exit slippage equal to the entry slippage/),
     ).toBeInTheDocument();
-    // Back to Close perp at maturity = both exit parts folded in at once:
+    // Back to Close positions = both exit parts folded in at once:
     // 282.22 − 80 − 49.16 = 153.06 → "+$153".
-    await userEvent.click(screen.getByRole('radio', { name: 'Close perp at maturity' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'Close positions' }));
     expect(screen.getAllByText('+$153').length).toBeGreaterThan(0);
   });
 
@@ -582,5 +587,80 @@ describe('StrategyCard — sizing gate', () => {
     expect(screen.getByText('$41,320')).toBeInTheDocument();
     expect(screen.getByText('(7.07% spread)')).toBeInTheDocument();
     expect(screen.queryByText(/Position not fully hedged/)).toBeNull();
+  });
+});
+
+/** A perp rolled into this maturity paid its fees and crossed its spread in a
+ * previous life — Gate still reports both against the position, so the card
+ * would otherwise bill this strategy for money it never spent. */
+describe('StrategyCard — perp entry cost', () => {
+  it('hands back exactly the entry cost the strategy was charged', () => {
+    render(card());
+    rollOver(); // isolate the entry toggle from the exit one
+    expect(screen.getAllByText('+$282').length).toBeGreaterThan(0);
+    expect(screen.getByText('-$115')).toBeInTheDocument();
+
+    omitEntry();
+    // Add-back = perp trading fees 65.00 + entry slippage 49.16 = 114.16.
+    // Projection 282.22 + 114.16 = 396.38 → "+$396"; APR 396.38 / (41,320 × 14/365).
+    expect(screen.getAllByText('+$396').length).toBeGreaterThan(0);
+    expect(screen.getByText('+25.01%')).toBeInTheDocument();
+    // Current PnL moves too: −114.91 + 114.16 = −0.75.
+    expect(screen.getByText('-$1')).toBeInTheDocument();
+    expect(screen.queryByText('-$115')).not.toBeInTheDocument();
+  });
+
+  it('moves the "now" line — the deliberate contrast with the exit toggle', () => {
+    const { container } = render(card());
+    rollOver();
+    openDetails();
+    const level = () =>
+      Number(container.querySelector('[data-segment="now-total"]')?.getAttribute('data-level'));
+    expect(level()).toBeCloseTo(-114.91, 2);
+    omitEntry();
+    expect(level()).toBeCloseTo(-0.75, 2);
+  });
+
+  it('composes with the exit toggle — the two assumptions stay independent', () => {
+    render(card()); // Close positions (default) + Omit
+    omitEntry();
+    // 282.22 + 114.16 − (80 + 49.16) = 267.22. The exit slippage still folds in
+    // at its FULL magnitude even though the server seeds it from the very entry
+    // slippage just handed back — you still have to cross back out.
+    expect(screen.getAllByText('+$267').length).toBeGreaterThan(0);
+    expect(screen.getByText('+16.86%')).toBeInTheDocument();
+  });
+
+  it('drops the entry bars from BOTH waterfalls, and both identities still land', () => {
+    const { container } = render(card());
+    rollOver();
+    omitEntry();
+    openDetails();
+    const segs = [...container.querySelectorAll('[data-segment]')].map((el) =>
+      el.getAttribute('data-segment'),
+    );
+    for (const gone of [
+      'paid-perp-fees',
+      'paid-entry-slippage',
+      'now-perp-entry',
+      'now-entry-slip',
+    ]) {
+      expect(segs).not.toContain(gone);
+    }
+    // Costs this strategy really did pay are untouched.
+    expect(segs).toContain('paid-boros-trade');
+    expect(segs).toContain('now-boros-entry');
+    // Both running levels still land on their authoritative totals (the same
+    // invariant ProfitBars' dev-only drift warning guards).
+    const lastCost = [
+      ...container.querySelectorAll('[data-kind^="cost"]:not([data-segment^="now-"])'),
+    ].at(-1);
+    expect(Number(lastCost?.getAttribute('data-level'))).toBeCloseTo(396.38, 2);
+    expect(
+      Number(container.querySelector('[data-segment="profit"]')?.getAttribute('data-level')),
+    ).toBeCloseTo(396.38, 2);
+    expect(
+      Number(container.querySelector('[data-segment="now-total"]')?.getAttribute('data-level')),
+    ).toBeCloseTo(-0.75, 2);
   });
 });
