@@ -813,6 +813,47 @@ describe('cutover-review regressions', () => {
     store.close();
   });
 
+  it('[C1c] dealFillReports returns only usable two-leg non-exit DONE deals, ordered', () => {
+    const store = new Store(':memory:');
+    const base = {
+      a: { contract: A_CONTRACT, side: 'SELL' as const, lot: '0.001', minSize: '0', minNotional: '0', tick: '0.01' },
+      b: { contract: B_CONTRACT, side: 'BUY' as const, lot: '0.001', minSize: '0', minNotional: '0', tick: '0.01' },
+      targetQty: '1', limitPrice: null, pricePolicy: 'touch' as const, deadlineAt: null,
+      makerNotBefore: 0, hedgeNotBefore: 0, pocRejects: 0, hedgeRejectStreak: 0,
+      maxClip: null, clipBandBp: null, haltReason: null,
+    };
+    const report = JSON.stringify({ aFilled: '1', bFilled: '1', unhedged: '0', reason: 'target reached', aAvgFill: '100.5', bAvgFill: '100.6' });
+    // Usable, out of created_at order to pin the ORDER BY.
+    store.createPair({ ...base, id: 'later', mode: 'DONE', reportJson: report, createdAt: 2_000 });
+    store.createPair({ ...base, id: 'earlier', mode: 'DONE', reportJson: report, createdAt: 1_000 });
+    // Excluded: still running, single-leg, both-reduce-only (an exit), corrupt
+    // report, and a report whose hedge leg never got an avg fill.
+    store.createPair({ ...base, id: 'running', mode: 'OPENING', reportJson: null, createdAt: 3_000 });
+    store.createPair({ ...base, id: 'single', b: null, mode: 'DONE', reportJson: report, createdAt: 3_100 });
+    store.createPair({
+      ...base, id: 'exit', mode: 'DONE', reportJson: report, createdAt: 3_200,
+      a: { ...base.a, reduceOnly: true }, b: { ...base.b, reduceOnly: true },
+    });
+    store.createPair({ ...base, id: 'corrupt', mode: 'DONE', reportJson: '{not json', createdAt: 3_300 });
+    store.createPair({
+      ...base, id: 'no-avg', mode: 'DONE', createdAt: 3_400,
+      reportJson: JSON.stringify({ aFilled: '1', bFilled: '1', aAvgFill: '100.5', bAvgFill: null }),
+    });
+    // A one-reduce/one-open migration deal stays in.
+    store.createPair({
+      ...base, id: 'migration', mode: 'DONE', reportJson: report, createdAt: 4_000,
+      a: { ...base.a, reduceOnly: true },
+    });
+
+    const rows = store.dealFillReports();
+    expect(rows.map((r) => r.createdAtMs)).toEqual([1_000, 2_000, 4_000]);
+    expect(rows[0]).toMatchObject({
+      aContract: A_CONTRACT, aSide: 'SELL', bContract: B_CONTRACT, bSide: 'BUY',
+      aFilled: '1', bFilled: '1', aAvgFill: '100.5', bAvgFill: '100.6',
+    });
+    store.close();
+  });
+
   it('[C2] a venue-cancel observed AFTER the deadline is honored as STOP, never converted', async () => {
     const w = mkWorld({ deadlineInMs: 10_000 });
     await stepChecked(w);

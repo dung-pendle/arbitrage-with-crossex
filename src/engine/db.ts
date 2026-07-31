@@ -179,6 +179,20 @@ function toOrder(r: OrderDbRow): OrderRow {
 }
 
 /** Patchable pair fields (a patch is one small committed transaction). */
+/** One finished two-leg deal's realized fills, verbatim journal strings —
+ * consumed by the strategy route, which converts to numbers and seconds. */
+export interface DealFillReportRow {
+  aContract: string;
+  aSide: string;
+  bContract: string;
+  bSide: string;
+  aFilled: string;
+  bFilled: string;
+  aAvgFill: string;
+  bAvgFill: string;
+  createdAtMs: number;
+}
+
 export interface PairPatch {
   mode?: PairMode;
   limitPrice?: string | null;
@@ -452,6 +466,59 @@ export class Store {
     }
     if (qtySum === FX_ZERO) return null;
     return fxStr(fxDiv(notional, qtySum));
+  }
+
+  /** Finished two-leg deals with both legs' realized fills, for the strategy
+   * view's entry-slippage chain. Excluded by SQL: single-leg deals (no gap to
+   * speak of) and both-reduce-only deals (those are exits, not entries — a
+   * one-reduce/one-open venue migration stays in). Rows whose report_json is
+   * missing or unusable are skipped rather than surfaced: the chain's qty
+   * reconciliation then fails and the strategy falls back to its honest
+   * "unknown" answer — never a wrong sum built on a partial read. */
+  dealFillReports(): DealFillReportRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT a_contract, a_side, b_contract, b_side, report_json, created_at FROM pair
+         WHERE mode = 'DONE' AND b_contract IS NOT NULL
+           AND NOT (a_reduce_only = 1 AND b_reduce_only = 1)
+         ORDER BY created_at`,
+      )
+      .all() as unknown as {
+      a_contract: string;
+      a_side: string;
+      b_contract: string;
+      b_side: string;
+      report_json: string | null;
+      created_at: number;
+    }[];
+    const out: DealFillReportRow[] = [];
+    for (const r of rows) {
+      let report: { aFilled?: unknown; bFilled?: unknown; aAvgFill?: unknown; bAvgFill?: unknown };
+      try {
+        report = JSON.parse(r.report_json ?? '') as typeof report;
+      } catch {
+        continue;
+      }
+      const str = (v: unknown): string | null =>
+        typeof v === 'string' && Number.isFinite(Number(v)) && Number(v) > 0 ? v : null;
+      const aFilled = str(report.aFilled);
+      const bFilled = str(report.bFilled);
+      const aAvgFill = str(report.aAvgFill);
+      const bAvgFill = str(report.bAvgFill);
+      if (!aFilled || !bFilled || !aAvgFill || !bAvgFill) continue;
+      out.push({
+        aContract: r.a_contract,
+        aSide: r.a_side,
+        bContract: r.b_contract,
+        bSide: r.b_side,
+        aFilled,
+        bFilled,
+        aAvgFill,
+        bAvgFill,
+        createdAtMs: r.created_at,
+      });
+    }
+    return out;
   }
 
   alert(

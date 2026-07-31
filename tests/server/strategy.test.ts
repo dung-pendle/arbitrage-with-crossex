@@ -7,6 +7,8 @@
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CoreError } from '../../src/core/errors';
+import { Store } from '../../src/engine/db';
+import { FakeVenue, VirtualClock } from '../unit/engine-sim';
 import { HOST, makeTestApp, mockGateGet } from './helpers/gate-nock';
 import { raw } from '../helpers/boros-fixtures';
 import { borosStub } from '../helpers/boros-stub';
@@ -151,6 +153,52 @@ describe('GET /api/strategy/:address', () => {
     expect(s.feesUsd.future.perpExitSlippageUsd).toBeCloseTo(ENTRY_SLIPPAGE, 6);
     expect(data.totals.perpExitFeesTotalUsd).toBeCloseTo(680, 6);
     expect(data.totals.perpExitSlippageTotalUsd).toBeCloseTo(ENTRY_SLIPPAGE, 6);
+  });
+
+  it('chains a venue-migrated book’s entry slippage from the seeded deal journal', async () => {
+    // The HL short predates the OKX long by 10 days: its live entry (1900.0)
+    // vs OKX's (1883.4) is mostly drift — the route must answer from the
+    // journal instead: (1900.4−1900.0)×531 + (1883.4−1883.0)×531 = $424.80.
+    const migrated = structuredClone(gatePositions);
+    migrated[0].entry_price = '1900.0';
+    migrated[0].create_time = String((NOW - 22 * DAY) * 1000);
+
+    const store = new Store(':memory:');
+    const legDefaults = { lot: '1', minSize: '0', minNotional: '0', tick: '0.01' };
+    const pairDefaults = {
+      targetQty: '531', limitPrice: null, pricePolicy: 'touch' as const, deadlineAt: null,
+      makerNotBefore: 0, hedgeNotBefore: 0, pocRejects: 0, hedgeRejectStreak: 0,
+      maxClip: null, clipBandBp: null, haltReason: null, mode: 'DONE' as const,
+    };
+    store.createPair({
+      ...pairDefaults,
+      id: 'original',
+      a: { ...legDefaults, contract: 'HYPERLIQUID_FUTURE_ETH_USDC', side: 'SELL' },
+      b: { ...legDefaults, contract: 'GATE_FUTURE_ETH_USDT', side: 'BUY' },
+      reportJson: JSON.stringify({ aFilled: '531', bFilled: '531', aAvgFill: '1900.0', bAvgFill: '1900.4' }),
+      createdAt: (NOW - 22 * DAY) * 1000,
+    });
+    store.createPair({
+      ...pairDefaults,
+      id: 'migration',
+      a: { ...legDefaults, contract: 'GATE_FUTURE_ETH_USDT', side: 'SELL', reduceOnly: true },
+      b: { ...legDefaults, contract: 'OKX_FUTURE_ETH_USDT', side: 'BUY' },
+      reportJson: JSON.stringify({ aFilled: '531', bFilled: '531', aAvgFill: '1883.0', bAvgFill: '1883.4' }),
+      createdAt: (NOW - 12 * DAY) * 1000,
+    });
+
+    app = makeTestApp({
+      borosFetch: borosStub(borosBodies()),
+      engine: { store, venue: new FakeVenue(), clock: new VirtualClock() },
+    });
+    mockGateGet('/positions', { body: migrated });
+
+    const res = await app.inject({ method: 'GET', url: `/api/strategy/${ADDR}`, headers: HOST });
+    expect(res.statusCode).toBe(200);
+    const s = res.json().data.strategies[0];
+    expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeCloseTo(2 * ENTRY_SLIPPAGE, 6);
+    expect(s.feesUsd.future.perpExitSlippageUsd).toBeCloseTo(2 * ENTRY_SLIPPAGE, 6);
+    expect(s.warnings.join(' ')).toMatch(/summed from 2 deals in this terminal's journal/);
   });
 
   it('reports null exit fees when the fee schedule is unavailable (never a guess)', async () => {

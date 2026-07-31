@@ -72,6 +72,27 @@ export interface PerpFundingLedger {
   coversFromSec: number;
 }
 
+/** One finished two-leg deal from the local engine journal, shaped by the
+ * route. Both fills of one deal are contemporaneous by construction (the
+ * engine hedges within seconds), so each deal's fill gap is pure crossing
+ * cost — unlike the gap between two live entry averages, which absorbs every
+ * market move between the legs' open times. Contracts are venue-qualified
+ * CrossEx symbols. */
+export interface DealFillRecord {
+  aContract: string;
+  aSide: 'BUY' | 'SELL';
+  bContract: string;
+  bSide: 'BUY' | 'SELL';
+  /** Absolute filled qty per leg. */
+  aFilled: number;
+  bFilled: number;
+  /** Qty-weighted average fill price per leg. */
+  aAvgFill: number;
+  bAvgFill: number;
+  /** Unix seconds of the deal row. */
+  createdAtSec: number;
+}
+
 export interface StrategyLeg {
   kind: 'perp' | 'boros';
   /** Normalized venue key (BINANCE / HYPERLIQUID / …). */
@@ -469,6 +490,76 @@ const HEDGE_BAND = 0.02;
  * lock may simply not have passed yet. Beyond it, absence is suspicious. */
 const FUNDING_LEDGER_GRACE_SEC = 8 * 3600;
 
+/** Widest open-time gap at which the two live entry averages still count as
+ * contemporaneous. A position's createTime stamps at its FIRST fill and the
+ * engine hedges each fill within seconds, so even a long-resting maker opens
+ * both positions moments apart once filling starts; 3× the 5-minute convert
+ * deadline tolerates re-pegs and slow partial starts. Beyond it the entry gap
+ * absorbs market drift and stops being slippage. */
+const PERP_ENTRY_SYNC_MAX_SEC = 15 * 60;
+
+/** How far before the earliest live position's open the deal chain may reach:
+ * a deal row's created_at precedes the position's first fill by however long
+ * the maker rested, so the window must cover intent-to-first-fill lag. */
+const DEAL_CHAIN_LOOKBACK_SEC = 48 * 3600;
+
+/** Relative tolerance for the chain's qty reconciliation — absorbs lot
+ * rounding and dust-sized unhedged remainders (mirrors HEDGE_BAND). */
+const DEAL_CHAIN_QTY_BAND = 0.02;
+
+/** True entry slippage of a book built across several executions: the sum of
+ * each journal deal's own contemporaneous fill gap. Valid only when the deals
+ * fully explain the live book — the signed filled quantities must net to the
+ * live legs' sizes (and to ~zero on every intermediate venue), else some of
+ * the book was built off-journal and a sum would silently be wrong: null,
+ * never a guess. Venue is deliberately NOT matched per deal — a migration
+ * chain flows through venues the live book no longer holds. */
+export function chainPerpEntrySlippageUsd(
+  deals: DealFillRecord[],
+  pair: {
+    base: string;
+    longSymbol: string;
+    longQty: number;
+    shortSymbol: string;
+    shortQty: number;
+    earliestOpenSec: number | null;
+  },
+): { usd: number; deals: number } | null {
+  const sinceSec = (pair.earliestOpenSec ?? 0) - DEAL_CHAIN_LOOKBACK_SEC;
+  const netQtyBySymbol = new Map<string, number>();
+  let gapUsd = 0;
+  let used = 0;
+  for (const d of deals) {
+    if (d.createdAtSec < sinceSec) continue;
+    if (parseSymbol(d.aContract).base !== pair.base || parseSymbol(d.bContract).base !== pair.base)
+      continue;
+    if (d.aSide === d.bSide) return null; // not an opposing pair — journal corruption
+    const matched = Math.min(d.aFilled, d.bFilled);
+    if (!(matched > 0) || !(d.aAvgFill > 0) || !(d.bAvgFill > 0)) return null;
+    const longFill = d.aSide === 'BUY' ? d.aAvgFill : d.bAvgFill;
+    const shortFill = d.aSide === 'BUY' ? d.bAvgFill : d.aAvgFill;
+    gapUsd += (longFill - shortFill) * matched;
+    netQtyBySymbol.set(
+      d.aContract,
+      (netQtyBySymbol.get(d.aContract) ?? 0) + (d.aSide === 'BUY' ? d.aFilled : -d.aFilled),
+    );
+    netQtyBySymbol.set(
+      d.bContract,
+      (netQtyBySymbol.get(d.bContract) ?? 0) + (d.bSide === 'BUY' ? d.bFilled : -d.bFilled),
+    );
+    used++;
+  }
+  if (used === 0) return null;
+  const band = DEAL_CHAIN_QTY_BAND * Math.max(pair.longQty, pair.shortQty);
+  const expected = (symbol: string): number =>
+    symbol === pair.longSymbol ? pair.longQty : symbol === pair.shortSymbol ? -pair.shortQty : 0;
+  const symbols = new Set([...netQtyBySymbol.keys(), pair.longSymbol, pair.shortSymbol]);
+  for (const s of symbols) {
+    if (Math.abs((netQtyBySymbol.get(s) ?? 0) - expected(s)) > band) return null;
+  }
+  return { usd: gapUsd, deals: used };
+}
+
 function assembleStrategy(
   base: string,
   maturity: number,
@@ -479,6 +570,7 @@ function assembleStrategy(
   clockStartOverrideSec?: number,
   venueFees?: VenueFeeRow[] | null,
   fundingLedger?: PerpFundingLedger | null,
+  dealFills?: DealFillRecord[] | null,
 ): StrategyRollup {
   const warnings: string[] = [];
   const borosLegs = borosBuilds.map((b) => b.leg);
@@ -646,21 +738,60 @@ function assembleStrategy(
 
   // --- Entry slippage (the perp pair's crossing cost) ---------------------------
   // Computable only for a simple pair — exactly one long + one short perp leg
-  // with known entry prices. Signed: paying up for the long relative to the
-  // short is a cost; negative means the pair was entered at a favorable gap.
-  // No perp legs at all ⇒ structurally 0 (nothing was crossed), never null —
-  // a null here would poison the account totals for every OTHER strategy.
+  // with known entry prices — and from LIVE entries only when the two opens are
+  // contemporaneous: the gap between entry averages is crossing cost only if no
+  // market time passed between them. A book rebuilt leg-by-leg (venue
+  // migration) instead sums each journal deal's own contemporaneous gap, so
+  // drift between the opens never masquerades as slippage. Signed: paying up
+  // for the long relative to the short is a cost; negative means a favorable
+  // gap. No perp legs at all ⇒ structurally 0 (nothing was crossed), never
+  // null — a null here would poison the account totals for every OTHER
+  // strategy.
   const longPerps = perpBuilds.filter((b) => b.leg.side === 'LONG');
   const shortPerps = perpBuilds.filter((b) => b.leg.side === 'SHORT');
   let perpEntrySlippageUsd: number | null = perpBuilds.length === 0 ? 0 : null;
+  let slippageCauseWarned = false;
   if (perpBuilds.length === 2 && longPerps.length === 1 && shortPerps.length === 1) {
     const [lo] = longPerps;
     const [sh] = shortPerps;
     if (lo.entryPrice > 0 && sh.entryPrice > 0) {
-      perpEntrySlippageUsd = (lo.entryPrice - sh.entryPrice) * Math.min(lo.qty, sh.qty);
+      const loOpen = lo.leg.openedAt;
+      const shOpen = sh.leg.openedAt;
+      const synced =
+        loOpen !== null && shOpen !== null && Math.abs(loOpen - shOpen) <= PERP_ENTRY_SYNC_MAX_SEC;
+      if (synced) {
+        perpEntrySlippageUsd = (lo.entryPrice - sh.entryPrice) * Math.min(lo.qty, sh.qty);
+      } else {
+        const opens = [loOpen, shOpen].filter((t): t is number => t !== null && t > 0);
+        const chained = dealFills?.length
+          ? chainPerpEntrySlippageUsd(dealFills, {
+              base,
+              longSymbol: lo.symbol,
+              longQty: lo.qty,
+              shortSymbol: sh.symbol,
+              shortQty: sh.qty,
+              earliestOpenSec: opens.length ? Math.min(...opens) : null,
+            })
+          : null;
+        const cause =
+          loOpen === null || shOpen === null
+            ? "a perp leg's open time is unknown, so the entries cannot be confirmed contemporaneous"
+            : 'the perp legs were opened at different times, so the live entry gap would include market drift';
+        if (chained !== null) {
+          perpEntrySlippageUsd = chained.usd;
+          warnings.push(
+            `Entry slippage for ${base} is summed from ${chained.deals} deal${chained.deals === 1 ? '' : 's'} in this terminal's journal (${cause}).`,
+          );
+        } else {
+          slippageCauseWarned = true;
+          warnings.push(
+            `Entry slippage for ${base} is unknown (${cause}, and the local deal journal cannot reconstruct the original fills) — it is excluded from the cost totals.`,
+          );
+        }
+      }
     }
   }
-  if (perpEntrySlippageUsd === null && perpBuilds.length > 0) {
+  if (perpEntrySlippageUsd === null && perpBuilds.length > 0 && !slippageCauseWarned) {
     warnings.push(
       `Entry slippage for ${base} is unknown (not a simple 1-long/1-short perp pair with known entries) — it is excluded from the cost totals.`,
     );
@@ -813,6 +944,10 @@ export interface BuildStrategiesInput {
   /** CrossEx account-book funding ledger — re-bases perp funding to the clock
    * start when a position predates it; null/absent = ledger unavailable. */
   perpFunding?: PerpFundingLedger | null;
+  /** Finished deals from the local engine journal — chains true entry slippage
+   * across leg migrations when the live entries are not contemporaneous;
+   * null/absent = journal unavailable (public mode, tests). */
+  dealFills?: DealFillRecord[] | null;
   nowSec: number;
 }
 
@@ -888,6 +1023,7 @@ export function buildStrategies(input: BuildStrategiesInput): StrategyReturns {
       input.clockStartOverrideSec,
       input.venueFees,
       input.perpFunding,
+      input.dealFills,
     ),
   );
   strategies.sort(

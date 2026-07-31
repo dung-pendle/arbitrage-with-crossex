@@ -8,8 +8,10 @@ import type { BorosCollateralZone, BorosMarket, BorosTxn } from '../../src/core/
 import { resolveCollateralPricesUsd } from '../../src/core/boros/client';
 import {
   buildStrategies,
+  chainPerpEntrySlippageUsd,
   SECONDS_IN_YEAR,
   type BuildStrategiesInput,
+  type DealFillRecord,
   type PerpPositionLike,
 } from '../../src/core/boros/returns';
 import { imInputs, raw } from '../helpers/boros-fixtures';
@@ -767,6 +769,189 @@ describe('buildStrategies — entry slippage', () => {
     perps[1].positionQty = '400';
     const s = buildStrategies(input({ perpPositions: perps })).strategies[0];
     expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeCloseTo((1883.4 - 1883.0) * 400, 6);
+  });
+});
+
+describe('buildStrategies — migrated perp pair (entry slippage chaining)', () => {
+  /** The HL short's ORIGINAL entry, 10 days before the OKX long existed. The
+   * live entry gap (1883.4 − 1900.0) × 531 = −$8,814.60 is almost entirely
+   * market drift over those 10 days — the number the fix must never show. */
+  const H0 = 1900.0;
+  const PHANTOM = (1883.4 - H0) * 531;
+  function migratedPerps(): PerpPositionLike[] {
+    const perps = ethPerps();
+    perps[0].entryPrice = String(H0);
+    perps[0].createTime = String((OPENED - 10 * DAY) * 1000);
+    return perps;
+  }
+  /** The chain that actually built the book: Short HL / Long GATE at t−10d,
+   * then the migration Short GATE (reduce) / Long OKX at t. Each deal's own
+   * contemporaneous gap is $212.40; the drift lives between deals. */
+  function migrationDeals(): DealFillRecord[] {
+    return [
+      {
+        aContract: 'HYPERLIQUID_FUTURE_ETH_USDC',
+        aSide: 'SELL',
+        bContract: 'GATE_FUTURE_ETH_USDT',
+        bSide: 'BUY',
+        aFilled: 531,
+        bFilled: 531,
+        aAvgFill: 1900.0,
+        bAvgFill: 1900.4,
+        createdAtSec: OPENED - 10 * DAY,
+      },
+      {
+        aContract: 'GATE_FUTURE_ETH_USDT',
+        aSide: 'SELL',
+        bContract: 'OKX_FUTURE_ETH_USDT',
+        bSide: 'BUY',
+        aFilled: 531,
+        bFilled: 531,
+        aAvgFill: 1883.0,
+        bAvgFill: 1883.4,
+        createdAtSec: OPENED,
+      },
+    ];
+  }
+  const CHAINED = 2 * ENTRY_SLIPPAGE; // $212.40 + $212.40
+
+  it('refuses the live entry gap without the journal: null + warning, exit null too', () => {
+    const s = buildStrategies(input({ perpPositions: migratedPerps() })).strategies[0];
+    expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeNull();
+    expect(s.feesUsd.future.perpExitSlippageUsd).toBeNull();
+    expect(s.warnings.join(' ')).toMatch(/opened at different times.*market drift/);
+    // Null counts as 0 in the paid total — excluded, never guessed.
+    const paidSettle = 2 * 1_000_000 * 0.001 * ((12 * DAY) / SECONDS_IN_YEAR);
+    expect(s.feesUsd.paid.totalUsd).toBeCloseTo(412 + 690 + paidSettle, 6);
+  });
+
+  it('sums the journal chain: both deals’ gaps, never the drift-sized live gap', () => {
+    const s = buildStrategies(
+      input({ perpPositions: migratedPerps(), dealFills: migrationDeals() }),
+    ).strategies[0];
+    expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeCloseTo(CHAINED, 6);
+    expect(s.feesUsd.paid.perpEntrySlippageUsd).not.toBeCloseTo(PHANTOM, 0);
+    expect(s.feesUsd.future.perpExitSlippageUsd).toBeCloseTo(CHAINED, 6); // exit mirrors the chain
+    expect(s.warnings.join(' ')).toMatch(/summed from 2 deals in this terminal's journal/);
+    const paidSettle = 2 * 1_000_000 * 0.001 * ((12 * DAY) / SECONDS_IN_YEAR);
+    expect(s.feesUsd.paid.totalUsd).toBeCloseTo(412 + CHAINED + 690 + paidSettle, 6);
+  });
+
+  it.each([
+    { deltaSec: 15 * 60, viaLiveEntries: true }, // at the sync limit — contemporaneous
+    { deltaSec: 15 * 60 + 1, viaLiveEntries: false }, // one second past — not attributable
+  ])('open-time gap of $deltaSec s → live entries: $viaLiveEntries', ({ deltaSec, viaLiveEntries }) => {
+    const perps = ethPerps(); // entries 1883.0/1883.4 — real gap, no drift
+    perps[0].createTime = String((OPENED - deltaSec) * 1000);
+    const s = buildStrategies(input({ perpPositions: perps })).strategies[0];
+    if (viaLiveEntries) expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeCloseTo(ENTRY_SLIPPAGE, 6);
+    else expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeNull();
+  });
+
+  it('treats a missing open time as not-contemporaneous, with its own warning', () => {
+    const perps = ethPerps();
+    delete perps[0].createTime;
+    const s = buildStrategies(input({ perpPositions: perps })).strategies[0];
+    expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeNull();
+    expect(s.warnings.join(' ')).toMatch(/open time is unknown/);
+  });
+
+  it('a same-time book keeps the live formula even when the journal is present', () => {
+    const s = buildStrategies(
+      input({ perpPositions: ethPerps(), dealFills: migrationDeals() }),
+    ).strategies[0];
+    // Precedence pin: positions API stays the source of truth for synced books.
+    expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeCloseTo(ENTRY_SLIPPAGE, 6);
+    expect(s.warnings.join(' ')).not.toMatch(/journal/);
+  });
+
+  it('chains a DCA top-up as a third gap', () => {
+    const perps = migratedPerps();
+    perps[0].positionQty = '-581';
+    perps[1].positionQty = '581';
+    const deals = [
+      ...migrationDeals(),
+      {
+        aContract: 'HYPERLIQUID_FUTURE_ETH_USDC',
+        aSide: 'SELL' as const,
+        bContract: 'OKX_FUTURE_ETH_USDT',
+        bSide: 'BUY' as const,
+        aFilled: 50,
+        bFilled: 50,
+        aAvgFill: 1901.0,
+        bAvgFill: 1901.2,
+        createdAtSec: OPENED + 3600,
+      },
+    ];
+    const s = buildStrategies(input({ perpPositions: perps, dealFills: deals })).strategies[0];
+    expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeCloseTo(CHAINED + (1901.2 - 1901.0) * 50, 6);
+    expect(s.warnings.join(' ')).toMatch(/summed from 3 deals/);
+  });
+
+  it('falls back to null when the chain does not reconcile with the live book', () => {
+    const perps = migratedPerps();
+    perps[0].positionQty = '-400'; // 131 contracts were closed off-journal
+    perps[1].positionQty = '400';
+    const s = buildStrategies(
+      input({ perpPositions: perps, dealFills: migrationDeals() }),
+    ).strategies[0];
+    expect(s.feesUsd.paid.perpEntrySlippageUsd).toBeNull();
+    expect(s.warnings.join(' ')).toMatch(/journal cannot reconstruct/);
+  });
+});
+
+describe('chainPerpEntrySlippageUsd (reducer)', () => {
+  const PAIR = {
+    base: 'ETH',
+    longSymbol: 'OKX_FUTURE_ETH_USDT',
+    longQty: 531,
+    shortSymbol: 'HYPERLIQUID_FUTURE_ETH_USDC',
+    shortQty: 531,
+    earliestOpenSec: OPENED - 10 * DAY,
+  };
+  const deal = (over: Partial<DealFillRecord> = {}): DealFillRecord => ({
+    aContract: 'HYPERLIQUID_FUTURE_ETH_USDC',
+    aSide: 'SELL',
+    bContract: 'OKX_FUTURE_ETH_USDT',
+    bSide: 'BUY',
+    aFilled: 531,
+    bFilled: 531,
+    aAvgFill: 1883.0,
+    bAvgFill: 1883.4,
+    createdAtSec: OPENED,
+    ...over,
+  });
+
+  it('returns null on no matching deals', () => {
+    expect(chainPerpEntrySlippageUsd([], PAIR)).toBeNull();
+    expect(
+      chainPerpEntrySlippageUsd([deal({ aContract: 'BYBIT_FUTURE_BTC_USDT', bContract: 'GATE_FUTURE_BTC_USDT' })], PAIR),
+    ).toBeNull();
+  });
+
+  it('poisons the whole chain on an unusable fill, never skip-and-miscount', () => {
+    expect(chainPerpEntrySlippageUsd([deal(), deal({ aAvgFill: 0 })], PAIR)).toBeNull();
+    expect(chainPerpEntrySlippageUsd([deal(), deal({ aSide: 'BUY' })], PAIR)).toBeNull();
+  });
+
+  it('drops deals older than the lookback, which then fails reconciliation', () => {
+    const old = deal({ createdAtSec: PAIR.earliestOpenSec - 49 * 3600 });
+    expect(chainPerpEntrySlippageUsd([old], PAIR)).toBeNull();
+  });
+
+  it('ignores other-base deals while reconciling the target base', () => {
+    const btc = deal({
+      aContract: 'BYBIT_FUTURE_BTC_USDT',
+      bContract: 'GATE_FUTURE_BTC_USDT',
+      aFilled: 3,
+      bFilled: 3,
+      aAvgFill: 64_000,
+      bAvgFill: 64_010,
+    });
+    const r = chainPerpEntrySlippageUsd([deal(), btc], PAIR);
+    expect(r).not.toBeNull();
+    expect(r!.usd).toBeCloseTo(ENTRY_SLIPPAGE, 6);
+    expect(r!.deals).toBe(1);
   });
 });
 

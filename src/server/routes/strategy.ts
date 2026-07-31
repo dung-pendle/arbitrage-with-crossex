@@ -16,6 +16,7 @@ import {
 } from '../../core/boros/client';
 import {
   buildStrategies,
+  type DealFillRecord,
   type PerpFundingEntry,
   type PerpFundingLedger,
   type PerpPositionLike,
@@ -211,6 +212,39 @@ export function strategyRoutes(deps: AppDeps) {
         }
       }
 
+      // Finished deals from the local journal — lets returns.ts chain the true
+      // entry slippage of a book rebuilt across venues. A synchronous local
+      // SQLite read (no cache, no network); absent engine (public mode) or any
+      // read failure degrades silently to the live-entries-only behavior.
+      let dealFills: DealFillRecord[] | null = null;
+      if (deps.engine && perpPositions !== null && perpPositions.length > 0) {
+        try {
+          dealFills = deps.engine.store
+            .dealFillReports()
+            .map((r) => ({
+              aContract: r.aContract,
+              aSide: r.aSide as DealFillRecord['aSide'],
+              bContract: r.bContract,
+              bSide: r.bSide as DealFillRecord['bSide'],
+              aFilled: Number(r.aFilled),
+              bFilled: Number(r.bFilled),
+              aAvgFill: Number(r.aAvgFill),
+              bAvgFill: Number(r.bAvgFill),
+              createdAtSec: epochToSec(r.createdAtMs),
+            }))
+            .filter(
+              (d) =>
+                (d.aSide === 'BUY' || d.aSide === 'SELL') &&
+                (d.bSide === 'BUY' || d.bSide === 'SELL') &&
+                [d.aFilled, d.bFilled, d.aAvgFill, d.bAvgFill].every(
+                  (n) => Number.isFinite(n) && n > 0,
+                ),
+            );
+        } catch {
+          dealFills = null;
+        }
+      }
+
       const result = buildStrategies({
         address,
         zones,
@@ -222,6 +256,7 @@ export function strategyRoutes(deps: AppDeps) {
         clockStartOverrideSec,
         venueFees,
         perpFunding,
+        dealFills,
         nowSec: Math.floor(Date.now() / 1000),
       });
       return reply.ok(result, { stale: stalePerps });
