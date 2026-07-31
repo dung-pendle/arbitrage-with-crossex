@@ -642,17 +642,17 @@ export function StrategyCard({
         <span
           className="flex items-center gap-1.5"
           title={
-            'Close positions: folds this position’s estimated exit costs into its profit numbers — assumes a maker+hedge close (maker on one leg, taker hedge on the other, cheapest assignment) and exit slippage equal to the entry slippage. Roll over: the perp legs stay open past maturity — no exit costs are charged.'
+            'Include: folds this position’s estimated exit costs into its profit numbers — assumes a maker+hedge close (maker on one leg, taker hedge on the other, cheapest assignment) and exit slippage equal to the entry slippage. Omit (rolling over): the perp legs stay open past maturity — no exit costs are charged.'
           }
         >
           <span className={microLabelClass}>Perp exit cost</span>
           <SegmentedToggle<ExitMode>
-            ariaLabel="Perp legs at maturity"
+            ariaLabel="Perp exit cost"
             value={exitMode}
             onChange={setExitMode}
             options={[
-              { value: 'close', label: 'Close positions' },
-              { value: 'roll', label: 'Roll over' },
+              { value: 'close', label: 'Include' },
+              { value: 'roll', label: 'Omit (rolling over)' },
             ]}
           />
         </span>

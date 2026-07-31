@@ -14,9 +14,13 @@ import { StrategyCard } from './StrategyCard';
 /** Charts default collapsed — open them via the See-more tab below the box. */
 const openDetails = () => fireEvent.click(screen.getByRole('button', { name: /see more/ }));
 
-/** The exit toggle defaults to 'Close positions' — flip a rendered card to
- * Roll over (no exit costs charged). */
-const rollOver = () => fireEvent.click(screen.getByRole('radio', { name: 'Roll over' }));
+/** The exit toggle defaults to 'Include' — flip a rendered card to
+ * Omit (rolling over) (no exit costs charged). */
+const rollOver = () =>
+  fireEvent.click(screen.getByRole('radio', { name: 'Omit (rolling over)' }));
+
+/** Both cost toggles carry an 'Include' radio — scope by the exit radiogroup. */
+const exitGroup = () => screen.getByRole('radiogroup', { name: 'Perp exit cost' });
 
 /** The entry toggle defaults to 'Include' — flip a rendered card to Omit, i.e.
  * the perps were rolled into this maturity and paid their entry beforehand. */
@@ -71,7 +75,7 @@ describe('StrategyCard — hero tiers', () => {
   });
 
   it('folds the checked exit parts into the hero numbers by default', () => {
-    render(card()); // defaults to 'Close positions' → both exit parts on
+    render(card()); // defaults to 'Include' → both exit parts on
     // Profit: 282.22 − (80 + 49.16) = 153.06 → "+$153" (hero + target annotation).
     expect(screen.getAllByText('+$153').length).toBeGreaterThan(0);
     expect(screen.queryByText('+$282')).not.toBeInTheDocument();
@@ -97,23 +101,23 @@ describe('StrategyCard — hero tiers', () => {
     expect(screen.getAllByTitle(/Current PnL/).length).toBeGreaterThan(0);
   });
 
-  it('the per-position Roll over / Close-positions toggle moves the hero profit', async () => {
-    render(card()); // defaults to "Close positions" → profit +$153
-    expect(screen.getByRole('radio', { name: 'Close positions' })).toHaveAttribute(
+  it('the per-position exit-cost Include / Omit toggle moves the hero profit', async () => {
+    render(card()); // defaults to "Include" → profit +$153
+    expect(within(exitGroup()).getByRole('radio', { name: 'Include' })).toHaveAttribute(
       'aria-checked',
       'true',
     );
     expect(screen.getAllByText('+$153').length).toBeGreaterThan(0);
-    // Roll over → no exit costs charged: back to the raw projection +$282.
-    await userEvent.click(screen.getByRole('radio', { name: 'Roll over' }));
+    // Omit (rolling over) → no exit costs charged: back to the raw projection +$282.
+    await userEvent.click(screen.getByRole('radio', { name: 'Omit (rolling over)' }));
     expect(screen.getAllByText('+$282').length).toBeGreaterThan(0);
     // The assumptions live in the toggle's tooltip.
     expect(
       screen.getByTitle(/maker\+hedge close .* exit slippage equal to the entry slippage/),
     ).toBeInTheDocument();
-    // Back to Close positions = both exit parts folded in at once:
+    // Back to Include = both exit parts folded in at once:
     // 282.22 − 80 − 49.16 = 153.06 → "+$153".
-    await userEvent.click(screen.getByRole('radio', { name: 'Close positions' }));
+    await userEvent.click(within(exitGroup()).getByRole('radio', { name: 'Include' }));
     expect(screen.getAllByText('+$153').length).toBeGreaterThan(0);
   });
 
