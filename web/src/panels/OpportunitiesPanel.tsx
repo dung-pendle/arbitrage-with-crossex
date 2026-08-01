@@ -35,6 +35,7 @@ import { QueryError } from '../components/QueryError';
 import { SegmentedToggle } from '../components/SegmentedToggle';
 import { Skeleton } from '../components/Skeleton';
 import { microLabelClass } from '../components/Th';
+import { borosMarketUrl } from '../lib/boros';
 import { fmtAge, fmtDateUtc, fmtNotionalShort, fmtPct, fmtUsd } from '../lib/fmt';
 import { IS_LANDING } from '../lib/landing';
 import { readJson, writeJson } from '../lib/storage';
@@ -283,6 +284,7 @@ function LegRow({
   label,
   venue,
   note,
+  href,
 }: {
   notionalUsd: number;
   side: 'short' | 'long';
@@ -290,6 +292,8 @@ function LegRow({
   venue: string;
   /** Trailing annotation; empty keeps the row's 4th cell in the grid. */
   note: ReactNode;
+  /** Link the label out (the Boros legs → the market page, side prefilled). */
+  href?: string;
 }) {
   return (
     // `sm:contents` hands the four cells back to the parent grid on real
@@ -300,11 +304,26 @@ function LegRow({
       <span className="num justify-self-start rounded-md border border-cyan-500/30 bg-cyan-500/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-cyan-300/85">
         {fmtNotionalShort(notionalUsd)}
       </span>
-      <span
-        className={`num text-xs font-medium ${side === 'short' ? 'text-rose-400' : 'text-emerald-400'}`}
-      >
-        {label}
-      </span>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          title={`Open this market on Boros with the ${side} side prefilled`}
+          className={`num text-xs font-medium underline decoration-current/40 underline-offset-2 transition-opacity hover:opacity-80 ${
+            side === 'short' ? 'text-rose-400' : 'text-emerald-400'
+          }`}
+        >
+          <span>{label}</span>{' '}
+          <span aria-hidden="true">↗</span>
+        </a>
+      ) : (
+        <span
+          className={`num text-xs font-medium ${side === 'short' ? 'text-rose-400' : 'text-emerald-400'}`}
+        >
+          {label}
+        </span>
+      )}
       <span className="num justify-self-start rounded-md border border-ink-700 bg-ink-800 px-1.5 py-0.5 text-[10px] font-medium text-ink-300">
         {venue}
       </span>
@@ -597,6 +616,7 @@ function OpportunityCard({
                   label={`Short ${base} funding`}
                   venue={pair.shortLeg.venue}
                   note={<RateNote midApr={pair.shortLeg.midApr} execApr={pair.shortLeg.execApr} />}
+                  href={borosMarketUrl(pair.shortLeg.marketId, 'short')}
                 />
                 <LegRow
                   notionalUsd={notionalUsd}
@@ -604,6 +624,7 @@ function OpportunityCard({
                   label={`Long ${base} funding`}
                   venue={pair.longLeg.venue}
                   note={<RateNote midApr={pair.longLeg.midApr} execApr={pair.longLeg.execApr} />}
+                  href={borosMarketUrl(pair.longLeg.marketId, 'long')}
                 />
               </div>
             </div>

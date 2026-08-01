@@ -188,6 +188,27 @@ describe('OpportunitiesPanel — ranking and null tolerance', () => {
     expect(document.body.textContent).not.toContain('NaN');
   });
 
+  it('links each Boros leg to its market page with the side prefilled', async () => {
+    server.use(opportunitiesHandler(makeOpportunitiesResult()));
+    renderWithClient(<OpportunitiesPanel />);
+    await waitFor(() => expect(toggles()).toHaveLength(1));
+    await userEvent.click(toggles()[0]);
+
+    // Fixture legs: short marketId 101, long 102. The direction lands the
+    // visitor on the exact side this leg needs.
+    expect(screen.getByRole('link', { name: /Short ETH funding/ })).toHaveAttribute(
+      'href',
+      'https://boros.pendle.finance/markets/101?form=market&direction=short',
+    );
+    expect(screen.getByRole('link', { name: /Long ETH funding/ })).toHaveAttribute(
+      'href',
+      'https://boros.pendle.finance/markets/102?form=market&direction=long',
+    );
+    // The CrossEx perp legs stay plain text — there is nowhere external to go.
+    expect(screen.queryByRole('link', { name: /^Short ETH$/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /^Long ETH$/ })).toBeNull();
+  });
+
   it('disables Execute only when NEITHER leg has a CrossEx symbol', async () => {
     const oneMissing = makeOpportunityGroup({
       pairs: [
