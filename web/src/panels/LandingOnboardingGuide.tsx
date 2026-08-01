@@ -57,7 +57,7 @@ export function LandingOnboardingGuide() {
       <div className="card px-5 py-5">
         <h2 className="text-xl font-bold tracking-tight text-ink-100">How to execute</h2>
         <p className="mt-1.5 text-xs leading-relaxed text-ink-300">
-          Every number on the left is live. Five steps and you can take them.
+          Every number on the left is live. Six steps and you can take them.
         </p>
         <ol className="mt-5 flex flex-col gap-[18px]">
           <Step n={1} title="Install the terminal" active {...step(1)}>
@@ -112,16 +112,20 @@ export function LandingOnboardingGuide() {
             you’ll deploy.
           </Step>
           <Step n={3} title="Enable CrossEx" {...step(3)}>
+            Switch on the CrossEx feature at <Ext href={GATE_CROSSEX_URL}>gate.com/crossex</Ext> —
+            the API-key permission and the transfer below need it enabled first.
+          </Step>
+          <Step n={4} title="Fund CrossEx" {...step(4)}>
             Move funds into <Ext href={GATE_CROSSEX_URL}>CrossEx</Ext>, Gate’s cross-exchange
             margin account.
           </Step>
-          <Step n={4} title="Create your API key" {...step(4)}>
+          <Step n={5} title="Create your API key" {...step(5)}>
             In <Ext href={GATE_API_KEYS_URL}>API Management</Ext>, create an APIv4 key with CrossEx
             trade permission only; leave Withdrawal off. Paste it into the setup guide of your
             locally-running terminal at <Ext href={LOCAL_APP_URL}>localhost:6688</Ext> — keys stay
             on your machine and never touch this website.
           </Step>
-          <Step n={5} title="Execute" {...step(5)}>
+          <Step n={6} title="Execute" {...step(6)}>
             Hit Execute on any card; all four legs land pre-filled.
           </Step>
         </ol>

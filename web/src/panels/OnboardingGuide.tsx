@@ -17,7 +17,7 @@ export function OnboardingGuide() {
       <div className="card px-5 py-5">
         <h2 className="text-xl font-bold tracking-tight text-ink-100">How to execute</h2>
         <p className="mt-1.5 text-xs leading-relaxed text-ink-300">
-          Every number on the left is live. Four steps and you can take them.
+          Every number on the left is live. Five steps and you can take them.
         </p>
         <ol className="mt-5 flex flex-col gap-[18px]">
           <Step n={1} title="Fund Gate">
@@ -25,10 +25,14 @@ export function OnboardingGuide() {
             you’ll deploy.
           </Step>
           <Step n={2} title="Enable CrossEx">
+            Switch on the CrossEx feature at <Ext href={GATE_CROSSEX_URL}>gate.com/crossex</Ext> —
+            the API-key permission and the transfer below need it enabled first.
+          </Step>
+          <Step n={3} title="Fund CrossEx">
             Move funds into <Ext href={GATE_CROSSEX_URL}>CrossEx</Ext>, Gate’s cross-exchange
             margin account.
           </Step>
-          <Step n={3} title="Paste your API key" active>
+          <Step n={4} title="Paste your API key" active>
             In <Ext href={GATE_API_KEYS_URL}>API Management</Ext>, create an APIv4 key with CrossEx
             trade permission only; leave Withdrawal off.
             <div
@@ -42,7 +46,7 @@ export function OnboardingGuide() {
               </span>
             </div>
           </Step>
-          <Step n={4} title="Execute">
+          <Step n={5} title="Execute">
             Hit Execute on any card; all four legs land pre-filled.
           </Step>
         </ol>

@@ -1,4 +1,4 @@
-/** The public rail: five steps collapsed to their titles, with step 1 open and
+/** The public rail: six steps collapsed to their titles, with step 1 open and
  * carrying the paste-into-your-own-LLM audit prompt above an OS-aware install
  * command. No key surface may ever appear here. */
 import { screen, within } from '@testing-library/react';
@@ -13,14 +13,17 @@ async function openStep(name: RegExp) {
 }
 
 describe('LandingOnboardingGuide', () => {
-  it('is five steps, install first, before anything touching Gate', () => {
+  it('is six steps, install first, before anything touching Gate', () => {
     renderWithClient(<LandingOnboardingGuide />);
 
     const steps = screen.getAllByRole('listitem');
-    expect(steps).toHaveLength(5);
+    expect(steps).toHaveLength(6);
     expect(within(steps[0]).getByRole('heading')).toHaveTextContent('Install the terminal');
     expect(within(steps[1]).getByRole('heading')).toHaveTextContent('Fund Gate');
-    expect(within(steps[3]).getByRole('heading')).toHaveTextContent('Create your API key');
+    // Enabling the feature precedes BOTH funding CrossEx and creating the key.
+    expect(within(steps[2]).getByRole('heading')).toHaveTextContent('Enable CrossEx');
+    expect(within(steps[3]).getByRole('heading')).toHaveTextContent('Fund CrossEx');
+    expect(within(steps[4]).getByRole('heading')).toHaveTextContent('Create your API key');
   });
 
   it('offers the audit inside step 1, above the install command', () => {
@@ -45,7 +48,7 @@ describe('LandingOnboardingGuide', () => {
       'aria-expanded',
       'true',
     );
-    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(4);
+    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(5);
     // A collapsed body is mounted but hidden, so nothing inside it is reachable.
     expect(screen.getByText(/gate\.com\/signup/)).not.toBeVisible();
     expect(screen.getByText(/\/bin\/bash -c/)).toBeVisible();

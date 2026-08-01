@@ -8,10 +8,11 @@ import { renderWithClient } from '../test/utils';
 import { OnboardingGuide } from './OnboardingGuide';
 
 describe('OnboardingGuide', () => {
-  it('renders the four steps, the Gate links and the credentials form', () => {
+  it('renders the five steps, the Gate links and the credentials form', () => {
     renderWithClient(<OnboardingGuide />);
 
-    for (const title of ['Fund Gate', 'Enable CrossEx', 'Paste your API key', 'Execute']) {
+    // Enable (switch the feature on) precedes BOTH funding CrossEx and the key.
+    for (const title of ['Fund Gate', 'Enable CrossEx', 'Fund CrossEx', 'Paste your API key', 'Execute']) {
       expect(screen.getByRole('heading', { name: title })).toBeInTheDocument();
     }
 
