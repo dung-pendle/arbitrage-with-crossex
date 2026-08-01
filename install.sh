@@ -108,7 +108,16 @@ install_node() {
 install_yarn() {
   [ -x "$ROOT/node/bin/yarn" ] && return
   say "Installing the yarn package manager (into the private runtime only)…"
-  PATH="$ROOT/node/bin:$PATH" "$ROOT/node/bin/npm" install -g --silent yarn@1.22.22
+  # --prefix is not optional here. npm's global prefix follows its own config,
+  # not the binary that was invoked: a user ~/.npmrc with prefix=~/.npm-global
+  # (a common no-sudo setup) would scatter yarn outside the private runtime —
+  # and $ROOT/node/bin/yarn, which everything downstream calls, would never
+  # appear. Pinning the prefix keeps the runtime self-contained and removable
+  # in one delete, which is the promise the installer makes. (install.ps1
+  # carries the same guard for Windows' %APPDATA%\npm default.)
+  PATH="$ROOT/node/bin:$PATH" "$ROOT/node/bin/npm" install -g --silent \
+    --prefix "$ROOT/node" yarn@1.22.22
+  [ -x "$ROOT/node/bin/yarn" ] || fail "yarn installation failed (expected $ROOT/node/bin/yarn)."
 }
 
 # ---------------------------------------------------------------------------
