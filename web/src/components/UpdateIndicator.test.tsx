@@ -48,6 +48,16 @@ describe('UpdateIndicator', () => {
     );
   });
 
+  it('the modal escapes its render site — portaled to <body>', async () => {
+    // The pill lives inside the sticky blurred header; without the portal the
+    // header's backdrop-filter contains the fixed overlay and the modal opens
+    // half-hidden behind the page content.
+    server.use(versionHandler({ latest: '1.2.0', updateAvailable: true }));
+    renderWithClient(<UpdateIndicator />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Update v1.2.0' }));
+    expect(screen.getByRole('dialog').parentElement).toBe(document.body);
+  });
+
   it('the modal closes', async () => {
     server.use(versionHandler({ latest: '1.2.0', updateAvailable: true }));
     renderWithClient(<UpdateIndicator />);

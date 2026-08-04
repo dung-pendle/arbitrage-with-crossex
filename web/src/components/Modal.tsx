@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface Props {
   title: ReactNode;
@@ -9,7 +10,10 @@ interface Props {
   children: ReactNode;
 }
 
-/** Centered overlay modal (review + execution views). */
+/** Centered overlay modal (review + execution views). Portaled to <body>: an
+ * ancestor with backdrop-filter/transform (the sticky blurred header, where
+ * the update pill lives) would otherwise become the containing block for the
+ * fixed overlay and trap it — half-hidden behind the page content. */
 export function Modal({ title, locked = false, onClose, widthClass = 'w-[700px]', children }: Props) {
   useEffect(() => {
     if (locked) return;
@@ -20,7 +24,7 @@ export function Modal({ title, locked = false, onClose, widthClass = 'w-[700px]'
     return () => window.removeEventListener('keydown', onKey);
   }, [locked, onClose]);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" role="dialog" aria-modal="true">
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
@@ -42,6 +46,7 @@ export function Modal({ title, locked = false, onClose, widthClass = 'w-[700px]'
         </div>
         <div className="max-h-[78vh] overflow-y-auto px-5 py-4">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
