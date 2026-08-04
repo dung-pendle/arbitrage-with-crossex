@@ -218,6 +218,7 @@ describe('buildOpportunities — canonical pair (both-market entry, close at mat
     const group = result().groups[0];
     expect(group.tokenId).toBe(3);
     expect(group.collateral).toBe('USDT');
+    expect(group.collateralPriceUsd).toBe(1);
     expect(group.underlying).toBe('ETH');
     expect(group.secondsToMaturity).toBe(30 * DAY);
     expect(group.pairs).toHaveLength(1);
@@ -655,6 +656,7 @@ describe('buildOpportunities — degraded modes', () => {
     );
     const group = out.groups[0];
     expect(group.collateral).toBe('BNB');
+    expect(group.collateralPriceUsd).toBeNull();
     expect(group.markets.every((m) => m.oiUsd === null)).toBe(true);
     expect(group.warnings.join(' ')).toMatch(/Can't price BNB collateral in USD/);
     expect(group.pairs[0].execSpreadApr).toBeNull();

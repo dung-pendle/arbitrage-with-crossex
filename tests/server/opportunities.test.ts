@@ -149,6 +149,7 @@ describe('GET /api/opportunities', () => {
     expect(data.groups).toHaveLength(1);
     const group = data.groups[0];
     expect(group.collateral).toBe('USDT');
+    expect(group.collateralPriceUsd).toBe(1);
     expect(group.underlying).toBe('ETH');
     expect(group.markets).toHaveLength(2);
     expect(group.markets.every((m: { bookStatus: string }) => m.bookStatus === 'ok')).toBe(true);

@@ -102,6 +102,11 @@ export interface StrategyLeg {
   base: string;
   side: 'LONG' | 'SHORT';
   notionalUsd: number;
+  /** Boros only: the collateral token the position is margined and sized in. */
+  collateral?: string;
+  /** |notional| in token units — Boros: |notionalSize| in the collateral token
+   * (notionalUsd = notionalToken × its USD price); perp: |qty| in the base coin. */
+  notionalToken?: number;
   /** Boros only: entry fixed APR and current mark APR. */
   entryApr?: number;
   markApr?: number;
@@ -368,7 +373,7 @@ function buildBorosLeg(
   px: number,
   markets: Map<number, BorosMarket>,
   txns: BorosTxn[],
-  group: { key: string; netBalanceUsd: number; initialMarginUsd: number },
+  group: { key: string; collateral: string; netBalanceUsd: number; initialMarginUsd: number },
 ): BorosLegBuild {
   const market = markets.get(p.marketId);
   const legWarnings: string[] = [];
@@ -397,6 +402,8 @@ function buildBorosLeg(
       base: (market?.base ?? '').toUpperCase(),
       side,
       notionalUsd: Math.abs(signed) * px,
+      collateral: group.collateral,
+      notionalToken: Math.abs(signed),
       entryApr: p.fixedApr,
       markApr: p.markApr || market?.markApr,
       floatingApr: market?.floatingApr,
@@ -433,9 +440,9 @@ function buildBorosLegs(
     const hasPositions = groups.some((g) => g.marketPositions.some((p) => fin(p.notionalSize) !== 0));
     if (!hasPositions) continue;
 
+    const sym = BOROS_TOKEN_SYMBOLS[zone.tokenId] ?? `token#${zone.tokenId}`;
     const px = pricesUsd.get(zone.tokenId) ?? null;
     if (px === null) {
-      const sym = BOROS_TOKEN_SYMBOLS[zone.tokenId] ?? `token#${zone.tokenId}`;
       warnings.push(
         `Can't price the ${sym} collateral zone in USD (no reference market) — its positions are excluded.`,
       );
@@ -446,6 +453,7 @@ function buildBorosLegs(
     groups.forEach((group, gi) => {
       const groupCtx = {
         key: `${zone.tokenId}:${group.isCross ? 'cross' : `iso${gi}`}`,
+        collateral: sym,
         netBalanceUsd: norm18(group.netBalance) * px,
         initialMarginUsd: group.marketPositions.reduce(
           (s, p) => s + norm18(p.positionInitialMargin ?? p.initialMargin) * px,
@@ -479,6 +487,7 @@ function buildPerpLeg(pos: PerpPositionLike): PerpLegBuild {
       base: base.toUpperCase(),
       side,
       notionalUsd: Math.abs(fin(pos.positionValue)),
+      notionalToken: Math.abs(qty),
       cashFlowUsd,
       // Display-only for perps: the delta-neutral pair's price MtM nets to
       // entry-gap noise, which the strategy accounts as entry slippage.

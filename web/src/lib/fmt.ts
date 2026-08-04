@@ -71,6 +71,37 @@ export function fmtNotionalShort(n: number): string {
   return fmtUsd(n, 0);
 }
 
+/** Token quantities for notional brackets: "2.63 ETH", "142.7 ETH",
+ * "1.2k HYPE", "1.5M HYPE". Compact ≥1k (fmtNotionalShort's tiers), 2 dp
+ * for 1–100, 1 dp for 100–1000, 3 sig figs below 1; trailing zeros dropped.
+ * Rounding that carries INTO the next tier promotes with it (999.96 → "1k",
+ * never a separator-less "1000"); dust under a millionth reads "<0.000001"
+ * rather than leaking exponential notation. */
+export function fmtTokenQty(amount: number, symbol: string): string {
+  if (!Number.isFinite(amount)) return '—';
+  const sign = amount < 0 ? '-' : '';
+  const abs = Math.abs(amount);
+  if (abs > 0 && abs < 1e-6) return `${sign}<0.000001 ${symbol}`;
+  const tier = (v: number): string => {
+    if (v >= 1e6) return `${+(v / 1e6).toFixed(v >= 1e7 ? 0 : 1)}M`;
+    if (v >= 1e3) {
+      const k = +(v / 1e3).toFixed(v >= 1e5 ? 0 : 1);
+      return k >= 1e3 ? tier(k * 1e3) : `${k}k`;
+    }
+    if (v >= 100) {
+      const r = +v.toFixed(1);
+      return r >= 1e3 ? tier(r) : `${r}`;
+    }
+    if (v >= 1) {
+      const r = +v.toFixed(2);
+      return r >= 100 ? tier(r) : `${r}`;
+    }
+    const r = +v.toPrecision(3);
+    return r >= 1 ? tier(r) : `${r}`;
+  };
+  return `${sign}${tier(abs)} ${symbol}`;
+}
+
 /** Ratio → percent: fmtPct(0.1234) → "12.34%". */
 export function fmtPct(ratio: number | string, dp = 2): string {
   const n = typeof ratio === 'number' ? ratio : Number(ratio);

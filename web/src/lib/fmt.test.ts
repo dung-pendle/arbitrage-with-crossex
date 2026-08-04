@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bps, feePct, fmtPct, fmtUsd, num, parseSymbol, sig, toDate } from './fmt';
+import { bps, feePct, fmtPct, fmtTokenQty, fmtUsd, num, parseSymbol, sig, toDate } from './fmt';
 
 // num/sig expectations are copied from tests/unit/format.test.ts in the repo
 // root — the web port must behave identically to src/core/numbers.ts.
@@ -39,6 +39,36 @@ describe('parseSymbol (port of core numbers.parseSymbol)', () => {
       base: '1000_PEPE',
       pair: '1000_PEPE_USDT',
     });
+  });
+});
+
+describe('fmtTokenQty', () => {
+  it.each([
+    [2.6316, 'ETH', '2.63 ETH'],
+    [5, 'ETH', '5 ETH'], // trailing zeros dropped
+    [142.71, 'ETH', '142.7 ETH'],
+    [1234, 'HYPE', '1.2k HYPE'],
+    [250_000, 'HYPE', '250k HYPE'],
+    [1_500_000, 'HYPE', '1.5M HYPE'],
+    [12_000_000, 'HYPE', '12M HYPE'],
+    [0.0847, 'BTC', '0.0847 BTC'],
+    [0, 'ETH', '0 ETH'],
+    // Rounding that carries into the next tier promotes with it.
+    [999.96, 'ETH', '1k ETH'],
+    [999_950, 'HYPE', '1M HYPE'],
+    [99.996, 'ETH', '100 ETH'],
+    [0.9996, 'ETH', '1 ETH'],
+  ])('fmtTokenQty(%f, %s) -> %s', (amount, symbol, expected) => {
+    expect(fmtTokenQty(amount, symbol)).toBe(expected);
+  });
+
+  it('degrades non-finite amounts to a dash', () => {
+    expect(fmtTokenQty(NaN, 'ETH')).toBe('—');
+  });
+
+  it('floors dust instead of leaking exponential notation', () => {
+    expect(fmtTokenQty(1e-7, 'BTC')).toBe('<0.000001 BTC');
+    expect(fmtTokenQty(1e-12, 'BTC')).toBe('<0.000001 BTC');
   });
 });
 

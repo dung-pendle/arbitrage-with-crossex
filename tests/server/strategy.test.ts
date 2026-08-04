@@ -140,6 +140,13 @@ describe('GET /api/strategy/:address', () => {
     expect(s.base).toBe('ETH');
     expect(s.hedge).toBe('hedged');
     expect(s.legs).toHaveLength(4);
+    // Boros legs ride the wire with their collateral identity; perp legs carry
+    // their base-coin size but no collateral.
+    const borosLeg = s.legs.find((l: { kind: string }) => l.kind === 'boros');
+    expect(borosLeg).toMatchObject({ collateral: 'USDT', notionalToken: 1_000_000 });
+    const perpLeg = s.legs.find((l: { kind: string }) => l.kind === 'perp');
+    expect(perpLeg.collateral).toBeUndefined();
+    expect(perpLeg.notionalToken).toBe(531);
     expect(s.spread).toBeCloseTo(0.05, 10);
     // ONE headline money pin proves the wire→domain normalization fed the math
     // real numbers; the full derivation (capital, fee splits, APR forms) is

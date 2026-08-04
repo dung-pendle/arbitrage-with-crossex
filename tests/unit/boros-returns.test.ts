@@ -279,9 +279,23 @@ describe('buildStrategies — scaling', () => {
     );
     const leg = out.strategies[0].legs[0];
     expect(leg.notionalUsd).toBeCloseTo(40 * 118_000, 3);
+    expect(leg.collateral).toBe('BTC');
+    expect(leg.notionalToken).toBeCloseTo(40, 10);
     expect(leg.cashFlowUsd).toBeCloseTo(0.12 * 118_000, 3);
     expect(leg.mtmUsd).toBeCloseTo(0.067 * 118_000, 3);
     expect(out.strategies[0].capitalUsd).toBeCloseTo(0.5 * 118_000, 3);
+  });
+
+  it('stamps every leg with its token-unit size; only Boros legs carry a collateral symbol', () => {
+    const out = buildStrategies(input());
+    const legs = out.strategies[0].legs;
+    for (const leg of legs.filter((l) => l.kind === 'boros')) {
+      expect(leg.collateral).toBe('USDT');
+      expect(leg.notionalToken).toBeCloseTo(1_000_000, 6);
+    }
+    const perp = legs.find((l) => l.kind === 'perp')!;
+    expect(perp.collateral).toBeUndefined();
+    expect(perp.notionalToken).toBeCloseTo(531, 10); // |positionQty|, base-coin units
   });
 
   it('excludes zones whose collateral token has no USD reference, with a warning', () => {

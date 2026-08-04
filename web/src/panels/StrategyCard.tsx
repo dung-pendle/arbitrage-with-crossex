@@ -30,11 +30,13 @@ import {
   fmtDateUtc,
   fmtPct,
   fmtTime,
+  fmtTokenQty,
   fmtUsd,
   fmtUsdCompact,
   num,
   parseSymbol,
   prettyVenue,
+  sig,
   toDate,
 } from '../lib/fmt';
 import { SegmentedToggle } from '../components/SegmentedToggle';
@@ -320,6 +322,13 @@ export function StrategyCard({
   const isCrossexPerp = (l: StrategyLeg) =>
     l.kind === 'perp' && perpSource === 'connected-gate-account';
 
+  // A token-margined strategy shows every leg's notional in token terms too:
+  // Boros legs in their collateral token, perp legs as their base-coin size.
+  // USDT-margined strategies stay pure-dollar throughout.
+  const tokenMargined = s.legs.some(
+    (l) => l.kind === 'boros' && l.collateral !== undefined && l.collateral !== 'USDT',
+  );
+
   const columns: Column<LegRow>[] = [
     {
       key: 'leg',
@@ -341,11 +350,27 @@ export function StrategyCard({
       key: 'notional',
       header: 'Notional',
       align: 'right',
-      render: (l) => (
-        <span className="num" title={fmtUsd(l.notionalUsd, 0)}>
-          {fmtUsdCompact(l.notionalUsd)}
-        </span>
-      ),
+      render: (l) => {
+        const token =
+          l.kind === 'boros'
+            ? l.collateral && l.collateral !== 'USDT' && l.notionalToken !== undefined
+              ? { qty: l.notionalToken, symbol: l.collateral }
+              : null
+            : tokenMargined && l.notionalToken
+              ? { qty: l.notionalToken, symbol: l.base }
+              : null;
+        return (
+          <span
+            className="num"
+            title={`${fmtUsd(l.notionalUsd, 0)}${token ? ` = ${sig(token.qty)} ${token.symbol}` : ''}`}
+          >
+            {fmtUsdCompact(l.notionalUsd)}
+            {token && (
+              <span className="text-ink-400"> ({fmtTokenQty(token.qty, token.symbol)})</span>
+            )}
+          </span>
+        );
+      },
     },
     {
       key: 'rate',

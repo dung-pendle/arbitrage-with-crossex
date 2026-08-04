@@ -195,6 +195,11 @@ export interface StrategyLeg {
   base: string;
   side: 'LONG' | 'SHORT';
   notionalUsd: number;
+  /** Boros only: the collateral token the position is margined and sized in. */
+  collateral?: string;
+  /** |notional| in token units — Boros: |notionalSize| in the collateral token
+   * (notionalUsd = notionalToken × its USD price); perp: |qty| in the base coin. */
+  notionalToken?: number;
   /** Boros only: entry fixed APR and current mark APR (fractions). */
   entryApr?: number;
   markApr?: number;
@@ -485,6 +490,8 @@ export interface OpportunityGroup {
   tokenId: number;
   /** Collateral token symbol, e.g. "USDT". */
   collateral: string;
+  /** USD price of the collateral token (1 for USDT); null = unpriceable. */
+  collateralPriceUsd: number | null;
   /** Unix seconds. */
   maturity: number;
   secondsToMaturity: number;

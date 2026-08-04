@@ -395,6 +395,59 @@ describe('OpportunitiesPanel — capital basis', () => {
   });
 });
 
+describe('OpportunitiesPanel — collateral bracket', () => {
+  it('brackets the notional in the collateral token on non-USDT groups', async () => {
+    // $10k at $1,900/ETH ⇒ 5.2632 ETH exact in the tooltip, 5.26 in the badge.
+    server.use(
+      opportunitiesHandler(
+        makeOpportunitiesResult({
+          groups: [
+            makeOpportunityGroup({ tokenId: 2, collateral: 'ETH', collateralPriceUsd: 1900 }),
+          ],
+        }),
+      ),
+    );
+    renderWithClient(<OpportunitiesPanel />);
+
+    await waitFor(() => expect(toggles()).toHaveLength(1));
+    expect(screen.getByTitle('$10,000 per leg ≈ 5.2632 ETH')).toHaveTextContent('$10k (5.26 ETH)');
+
+    // Expanded: all four legs carry the bracket — the Boros rate legs and the
+    // CrossEx perp legs alike (the same notional, in the collateral token).
+    await userEvent.click(toggles()[0]);
+    const borosBox = screen.getByText('On Boros').parentElement!;
+    expect(within(borosBox).getAllByText('$10k (5.26 ETH)')).toHaveLength(2);
+    const perpBox = screen.getByText('On CrossEx').parentElement!;
+    expect(within(perpBox).getAllByText('$10k (5.26 ETH)')).toHaveLength(2);
+  });
+
+  it('keeps USDT groups and unpriceable collateral pure-dollar', async () => {
+    server.use(
+      opportunitiesHandler(
+        makeOpportunitiesResult({
+          groups: [
+            makeOpportunityGroup(),
+            makeOpportunityGroup({
+              tokenId: 4,
+              collateral: 'BNB',
+              collateralPriceUsd: null,
+              underlying: 'GOLD',
+            }),
+          ],
+        }),
+      ),
+    );
+    renderWithClient(<OpportunitiesPanel />);
+
+    await waitFor(() => expect(toggles()).toHaveLength(2));
+    // Both cards: the plain dollar figure, the unchanged tooltip, no token text.
+    expect(screen.getAllByTitle('$10,000 per leg')).toHaveLength(2);
+    for (const el of screen.getAllByTitle('$10,000 per leg')) {
+      expect(el).toHaveTextContent(/^\$10k$/);
+    }
+  });
+});
+
 describe('OpportunitiesPanel — collapse', () => {
   it('collapsed shows the hero and the buttons but no breakdown; expanding reveals it', async () => {
     server.use(opportunitiesHandler(makeOpportunitiesResult()));

@@ -36,7 +36,7 @@ import { SegmentedToggle } from '../components/SegmentedToggle';
 import { Skeleton } from '../components/Skeleton';
 import { microLabelClass } from '../components/Th';
 import { borosMarketUrl } from '../lib/boros';
-import { fmtAge, fmtDateUtc, fmtNotionalShort, fmtPct, fmtUsd } from '../lib/fmt';
+import { fmtAge, fmtDateUtc, fmtNotionalShort, fmtPct, fmtTokenQty, fmtUsd, sig } from '../lib/fmt';
 import { IS_LANDING } from '../lib/landing';
 import { readJson, writeJson } from '../lib/storage';
 import { useDebounced } from '../lib/useDebounced';
@@ -280,6 +280,7 @@ const CAPITAL_APR_TITLE =
  * cells are a fragment so the parent grid keeps both rows aligned. */
 function LegRow({
   notionalUsd,
+  collateral,
   side,
   label,
   venue,
@@ -287,6 +288,8 @@ function LegRow({
   href,
 }: {
   notionalUsd: number;
+  /** Token-margined groups: the same notional in the collateral token. */
+  collateral?: { qty: number; symbol: string } | null;
   side: 'short' | 'long';
   label: string;
   venue: string;
@@ -303,6 +306,7 @@ function LegRow({
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 sm:contents">
       <span className="num justify-self-start rounded-md border border-cyan-500/30 bg-cyan-500/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-cyan-300/85">
         {fmtNotionalShort(notionalUsd)}
+        {collateral ? ` (${fmtTokenQty(collateral.qty, collateral.symbol)})` : ''}
       </span>
       {href ? (
         <a
@@ -384,6 +388,12 @@ function OpportunityCard({
   const netTone = netNegative ? 'text-rose-400' : 'text-emerald-400';
   const days = Math.max(1, Math.round(group.secondsToMaturity / 86_400));
   const maturityTitle = `Matures ${fmtDateUtc(group.maturity)} UTC · ${fmtAge(group.secondsToMaturity * 1000)} left`;
+  // Token-margined groups also size in the collateral token — bracket the
+  // notional with that amount (USDT groups stay pure-dollar).
+  const collateralQty =
+    group.collateral !== 'USDT' && group.collateralPriceUsd !== null && group.collateralPriceUsd > 0
+      ? { qty: notionalUsd / group.collateralPriceUsd, symbol: group.collateral }
+      : null;
   // Both legs unmapped ⇒ the ticket would arm nothing; one missing is fine (it
   // leaves that leg unselected by design). Fungible groups can collapse two
   // different assets, and the ticket only takes one base.
@@ -490,8 +500,17 @@ function OpportunityCard({
             )}
             <span className="px-1 text-ink-500">·</span>
             <span className="text-ink-400">Notional</span>
-            <span className="text-cyan-400/85" title={`${fmtUsd(notionalUsd, 0)} per leg`}>
+            <span
+              className="text-cyan-400/85"
+              title={`${fmtUsd(notionalUsd, 0)} per leg${collateralQty ? ` ≈ ${sig(collateralQty.qty)} ${collateralQty.symbol}` : ''}`}
+            >
               {fmtNotionalShort(notionalUsd)}
+              {collateralQty && (
+                <span className="text-cyan-400/60">
+                  {' '}
+                  ({fmtTokenQty(collateralQty.qty, collateralQty.symbol)})
+                </span>
+              )}
             </span>
             {/* The net story needs fees/books/leverage; when those are missing
                 (Gate down or unconfigured) the raw Boros spread is still the
@@ -575,6 +594,7 @@ function OpportunityCard({
               <div className="flex flex-col gap-2 sm:grid sm:grid-cols-[max-content_max-content_max-content_minmax(0,1fr)] sm:items-center sm:gap-x-2.5 sm:gap-y-1.5">
                 <LegRow
                   notionalUsd={notionalUsd}
+                  collateral={collateralQty}
                   side="short"
                   label={`Short ${base}`}
                   venue={pair.shortLeg.crossexVenue || pair.shortLeg.venue}
@@ -586,6 +606,7 @@ function OpportunityCard({
                 />
                 <LegRow
                   notionalUsd={notionalUsd}
+                  collateral={collateralQty}
                   side="long"
                   label={`Long ${base}`}
                   venue={pair.longLeg.crossexVenue || pair.longLeg.venue}
@@ -612,6 +633,7 @@ function OpportunityCard({
               <div className="flex flex-col gap-2 sm:grid sm:grid-cols-[max-content_max-content_max-content_minmax(0,1fr)] sm:items-center sm:gap-x-2.5 sm:gap-y-1.5">
                 <LegRow
                   notionalUsd={notionalUsd}
+                  collateral={collateralQty}
                   side="short"
                   label={`Short ${base} funding`}
                   venue={pair.shortLeg.venue}
@@ -620,6 +642,7 @@ function OpportunityCard({
                 />
                 <LegRow
                   notionalUsd={notionalUsd}
+                  collateral={collateralQty}
                   side="long"
                   label={`Long ${base} funding`}
                   venue={pair.longLeg.venue}

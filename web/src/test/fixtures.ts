@@ -256,6 +256,8 @@ export function makeStrategyLeg(overrides: Partial<StrategyLeg> = {}): StrategyL
     base: 'HYPE',
     side: 'SHORT',
     notionalUsd: 158_800,
+    collateral: 'USDT',
+    notionalToken: 158_800,
     entryApr: 0.0936,
     markApr: 0.0988,
     floatingApr: 0.1095,
@@ -279,6 +281,8 @@ function hypeLegs(): StrategyLeg[] {
       venue: 'BYBIT',
       side: 'LONG',
       notionalUsd: 160_316,
+      collateral: undefined,
+      notionalToken: 900, // perp legs carry their base-coin size
       entryApr: undefined,
       markApr: undefined,
       floatingApr: undefined,
@@ -295,6 +299,8 @@ function hypeLegs(): StrategyLeg[] {
       venue: 'HYPERLIQUID',
       side: 'SHORT',
       notionalUsd: 160_316,
+      collateral: undefined,
+      notionalToken: 900, // perp legs carry their base-coin size
       entryApr: undefined,
       markApr: undefined,
       floatingApr: undefined,
@@ -603,6 +609,7 @@ export function makeOpportunityGroup(overrides: Partial<OpportunityGroup> = {}):
   return {
     tokenId: 3,
     collateral: 'USDT',
+    collateralPriceUsd: 1,
     maturity: OPP_MATURITY,
     secondsToMaturity: OPP_SECONDS_TO_MATURITY,
     underlying: 'ETH',

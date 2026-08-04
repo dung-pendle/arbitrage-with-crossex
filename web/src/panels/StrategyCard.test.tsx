@@ -410,9 +410,53 @@ describe('StrategyCard — states', () => {
       }),
     );
     expect(screen.getByText('$250.0k')).toBeInTheDocument();
+    // USDT-margined Boros legs stay pure-dollar — no token bracket, bare title.
+    expect(screen.getByTitle('$250,000')).toHaveTextContent(/^\$250\.0k$/);
     const rate = screen.getByTitle('entry fixed APR → current mark APR');
     expect(rate.textContent).toBe('8.00%→—');
     expect(rate.textContent).not.toMatch(/NaN/);
+  });
+
+  it('token-margined strategies bracket every leg — Boros in collateral, perps in base coin', () => {
+    render(
+      card({
+        legs: [
+          makeStrategyLeg({ notionalUsd: 250_000, collateral: 'ETH', notionalToken: 131.58 }),
+          makeStrategyLeg({
+            kind: 'perp',
+            venue: 'BYBIT',
+            side: 'LONG',
+            notionalUsd: 250_000,
+            collateral: undefined,
+            notionalToken: 100,
+            entryApr: undefined,
+            markApr: undefined,
+            floatingApr: undefined,
+            maturity: undefined,
+            symbol: 'BYBIT_FUTURE_HYPE_USDT',
+          }),
+        ],
+        realizedPnlUsd: -39.24 * 2 - 49.16, // two default-netUsd legs — keep the identity exact
+      }),
+    );
+    // Exact size in the tooltip, compact bracket in the cell.
+    expect(screen.getByTitle('$250,000 = 131.58 ETH')).toHaveTextContent('$250.0k (131.6 ETH)');
+    // The perp rides along in its base coin (the leg's HYPE default).
+    expect(screen.getByTitle('$250,000 = 100 HYPE')).toHaveTextContent('$250.0k (100 HYPE)');
+  });
+
+  it('USDT-margined strategies stay pure-dollar on every leg', () => {
+    render(card());
+    // Default book: 2 perps at $160,316 (with base-coin sizes stamped) and
+    // 2 USDT Boros legs at $158,800 — none may grow a bracket.
+    for (const cell of screen.getAllByTitle('$160,316')) {
+      expect(cell).toHaveTextContent(/^\$160\.3k$/);
+    }
+    expect(screen.getAllByTitle('$160,316')).toHaveLength(2);
+    for (const cell of screen.getAllByTitle('$158,800')) {
+      expect(cell).toHaveTextContent(/^\$158\.8k$/);
+    }
+    expect(screen.getAllByTitle('$158,800')).toHaveLength(2);
   });
 
   it('unknown clock: no projection, no assumption caption, hero shows —', () => {

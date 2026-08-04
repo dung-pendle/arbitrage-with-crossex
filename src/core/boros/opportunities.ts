@@ -179,6 +179,8 @@ export interface OpportunityGroup {
   tokenId: number;
   /** Collateral token symbol, e.g. "USDT". */
   collateral: string;
+  /** USD price of the collateral token (1 for USDT); null = unpriceable. */
+  collateralPriceUsd: number | null;
   /** Unix seconds. */
   maturity: number;
   secondsToMaturity: number;
@@ -857,6 +859,7 @@ export function buildOpportunities(
     return {
       tokenId: plan.tokenId,
       collateral: plan.collateral,
+      collateralPriceUsd,
       maturity: plan.maturity,
       secondsToMaturity,
       underlying: plan.underlying,
