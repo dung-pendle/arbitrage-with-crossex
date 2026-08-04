@@ -33,8 +33,10 @@ export function OnboardingGuide() {
             margin account.
           </Step>
           <Step n={4} title="Paste your API key" active>
-            In <Ext href={GATE_API_KEYS_URL}>API Management</Ext>, create an APIv4 key with CrossEx
-            trade permission only; leave Withdrawal off.
+            In <Ext href={GATE_API_KEYS_URL}>API Management</Ext>, create an APIv4 key for your
+            Trading account. Set IP Permissions to “Later” (unless your machine has a consistent
+            IP), and under Permissions tick only Cross-Exchange with Read and Write; leave
+            Withdrawal off.
             <div
               ref={formRef}
               className="relative mt-2 flex flex-col gap-2 rounded-lg border border-ink-700 bg-ink-950 p-3"
