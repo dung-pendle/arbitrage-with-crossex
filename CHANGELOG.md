@@ -3,6 +3,29 @@
 Only substantial releases are listed here — each one bumps `version.json` (which is what the
 in-app update check compares against).
 
+## 1.2.0 — 2026-08-04
+
+Cost modelling, order handling, and dashboard legibility.
+
+- **The perp entry cost is itemised.** A new "Perp entry cost" assumption joins the exit one
+  (now labelled Include / Omit (rolling over)), the cost breaks down per execution so a book
+  built across several deals can drop the ones a position never paid, and entry slippage
+  follows the deal journal even when a book was rebuilt along the way.
+- **Single orders behave like single orders.** A lone limit order is placed as a plain order
+  rather than a deal to supervise, its "order placed" receipt sticks, cancelling shows as
+  pending instead of the order silently vanishing, and a deal frozen on a venue status the
+  decoder cannot read can be unwedged. A pasted amount that isn't a number now says why.
+- **Token-margined markets show notionals in token terms.** For Boros markets not margined in
+  USDT, every leg's notional in the Opportunities and Positions boxes carries the token amount
+  in brackets — Boros legs in their collateral token, perp position legs as their base-coin
+  size. USDT-margined markets are unchanged.
+- **The opportunity details link out.** Each Boros leg opens its market on Boros with the
+  side prefilled.
+- **"Enable CrossEx" is its own onboarding step**, before the API key and the funds.
+- **Flat folder tabs.** The tab bar was machined down — colour is a signal, not decoration.
+- **Install and dev hardening.** `install.sh` pins npm's prefix so a user `~/.npmrc` can't
+  hijack the yarn install, and a dev stack can now run beside the installed app.
+
 ## 1.1.0 — 2026-07-30
 
 Security pass, acting on an external audit (its findings, and what remains open, are in

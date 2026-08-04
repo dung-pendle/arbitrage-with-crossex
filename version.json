@@ -1,10 +1,11 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "highlights": [
-    "The local API now requires a per-install token — other accounts on your machine can no longer drive it",
-    "Hand-cancelling an engine order can no longer abandon a live deal (both bypasses closed)",
-    "Install an exact commit with BOROS_REF, and see which one you're running in Settings → About",
-    "Windows key-file permissions no longer revert on every boot; a source checkout is no longer chmod'ed",
-    "The macOS installers stop killing unrelated processes that merely mention the server path"
+    "The perp entry cost is itemised per execution — drop the ones your position never paid, straight from the card",
+    "A single limit order is a plain order now: its receipt sticks, a cancel shows as pending, and a stuck deal can be unwedged",
+    "Token-margined markets show every leg's notional in token terms next to the dollars, in Opportunities and Positions",
+    "Each Boros leg in the opportunity details links to its market with the side prefilled",
+    "\"Enable CrossEx\" is its own onboarding step, before the API key and the funds",
+    "install.sh pins npm's prefix so a user ~/.npmrc can't hijack the yarn install"
   ]
 }
