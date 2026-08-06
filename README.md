@@ -119,6 +119,17 @@ for a Gate.io API key:
   platform. It stops the previous version first, so an old copy never lingers. Your keys
   and trade history are never touched by updates. When a new version is published, the
   terminal shows an amber **Update** pill in the header with these exact instructions.
+- ⚠️ **Leave the machine on while a deal is open.** A trade here is a *deal* — a maker leg
+  plus the hedge that neutralises it — and it is the server's reconcile loop that places
+  that hedge once the maker leg fills, that requotes, retries, and closes. Gate's CrossEx
+  has no dead-man's switch, so **nothing sits on the exchange as a backstop**: no resting
+  stop, no server-side unwind. If the machine sleeps or shuts down mid-deal, a half-filled
+  deal stays half-filled — one leg live, unhedged, moving with the market — for as long as
+  it takes you to bring the server back. Nothing is lost or corrupted: the first tick after
+  a restart reads venue truth and picks the deal up exactly where it left off (recovery *is*
+  the loop — see [docs/MAKER-HEDGE.md](docs/MAKER-HEDGE.md)). Your exposure in the meantime
+  is simply however long the server was down, so close out before a shutdown, or don't start
+  a deal you can't leave the machine running for.
 
 ### Uninstall
 

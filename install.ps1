@@ -522,8 +522,24 @@ function Install-Service {
   Set-Content -Path (Join-Path $LogDir 'server.err.log') -Value '' -Encoding UTF8
 
   $runner = Write-RunnerScript
-  $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-    -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runner`""
+  # conhost.exe, NOT powershell.exe with -WindowStyle Hidden. That flag cannot do
+  # the job: Windows allocates the console at CreateProcess, before PowerShell has
+  # parsed a single argument of its own, and the console is then handed to whatever
+  # the user's default terminal is. Where that is Windows Terminal - the default on
+  # a clean Windows 11 install - WT launches itself and shows a window, ignoring the
+  # SW_HIDE that PowerShell applies a moment later. The "background service" came up
+  # as a terminal window on the desktop, and closing that window killed the
+  # supervisor and left node.exe orphaned on the port with nothing watching it.
+  # Machines that still delegate to classic conhost honour the late hide and were
+  # never affected - which is why this reproduces on some boxes and not others.
+  #
+  # --headless creates no window at all, so the handoff never happens. It is how
+  # CreatePseudoConsole spawns conhost internally and has shipped since Windows 10
+  # 1809. conhost stays alive as the child's console host for as long as the
+  # supervisor runs, so the task instance stays Running and the one-minute
+  # repetition trigger below keeps behaving as a no-op under IgnoreNew.
+  $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
+    -Argument "--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$runner`""
   # Keepalive by REPETITION, not by restart-on-failure. Task Scheduler's "if the
   # task fails, restart every N" keys off the action's exit code and quietly does
   # not fire in a number of ordinary cases - it did not bring the server back
