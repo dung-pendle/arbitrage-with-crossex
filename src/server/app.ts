@@ -20,6 +20,7 @@ import { feesRoutes } from './routes/fees';
 import { healthRoutes } from './routes/health';
 import { leverageRoutes } from './routes/leverage';
 import { opportunitiesRoutes } from './routes/opportunities';
+import { registerPositionPage } from './position';
 import { ordersRoutes } from './routes/orders';
 import { positionsRoutes } from './routes/positions';
 import { previewRoutes } from './routes/preview';
@@ -74,6 +75,11 @@ export interface AppDeps {
    * copy's version from <repoRoot>/version.json — null means "unknown", which
    * disables the remote read entirely — plus the UPDATE_CHECK=0 opt-out. */
   updateCheck?: { current: string | null; disabled?: boolean };
+  /** The shared-position page (`/position?d=…` with server-injected OG meta).
+   * Set by the entry point iff the dist contains position.html — the landing
+   * build does, the terminal build doesn't. Credential-free by construction,
+   * so it registers in BOTH modes (see src/server/position.ts). */
+  positionPage?: { htmlPath: string };
 }
 
 declare module 'fastify' {
@@ -127,7 +133,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ? createHash('sha256').update(deps.authToken).digest()
     : null;
 
-  if (!deps.publicMode) {
+  if (deps.publicMode) {
+    // The public box serves strangers, but nothing on it is legitimately
+    // framed either — and /position reflects (validated, escaped) stranger
+    // input into HTML, so the browser-side walls cost nothing and stack:
+    // no framing, no MIME sniffing, and no full-URL Referer (?d= carries the
+    // shared numbers) on outbound navigation.
+    app.addHook('onRequest', async (_req, reply) => {
+      reply.header('X-Frame-Options', 'DENY');
+      reply.header('Content-Security-Policy', "frame-ancestors 'none'");
+      reply.header('X-Content-Type-Options', 'nosniff');
+      reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    });
+  } else {
     app.addHook('onRequest', async (req, reply) => {
       // The Host/Origin guard cannot stop framing: a page that iframes
       // http://localhost:6688 IS same-origin with /api, so its requests carry a
@@ -225,6 +243,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   for (const routes of routeModules) {
     app.register(routes(deps), { prefix: '/api' });
   }
+
+  // Not under /api (it serves HTML, not the envelope) and therefore never
+  // token-gated — the gate above is scoped to /api/ paths.
+  if (deps.positionPage) registerPositionPage(app, deps.positionPage.htmlPath);
 
   return app;
 }

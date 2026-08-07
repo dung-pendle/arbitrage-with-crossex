@@ -73,6 +73,32 @@ describe('public mode', () => {
     }
   });
 
+  it('serves every response with the browser-side walls — no framing, sniffing, or full-URL referers', async () => {
+    // The public origin now reflects (validated, escaped) stranger input at
+    // /position, so the defense-in-depth headers apply in public mode too.
+    app = makePublicApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/health',
+      headers: { host: 'example.com' },
+    });
+    expect(res.headers['x-frame-options']).toBe('DENY');
+    expect(res.headers['content-security-policy']).toBe("frame-ancestors 'none'");
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
+  });
+
+  it('has no /position page unless the entry point passes the dep (no new /api surface either)', async () => {
+    // The shared-position page is the one non-/api route a public deploy adds;
+    // its own suite (position-page.test.ts) pins the served behavior. Here:
+    // absent the dep — the exact makePublicApp shape above — it 404s like
+    // everything else, and no /api/position ever exists.
+    app = makePublicApp();
+    const headers = { host: 'example.com' };
+    expect((await app.inject({ method: 'GET', url: '/position', headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: '/api/position', headers })).statusCode).toBe(404);
+  });
+
   it('ignores ?fresh=1 — the second request is served from cache', async () => {
     const calls: string[] = [];
     app = makePublicApp(calls);

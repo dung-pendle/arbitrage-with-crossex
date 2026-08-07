@@ -42,6 +42,23 @@ export function SymbolCell({ symbol }: { symbol: string }) {
   );
 }
 
+/** One "SIDE · Venue" row of the stacked pair identity (short over long) —
+ * the opportunity card's compact pair block, shared with the position page's
+ * hero. Muted tones: it identifies, the side chips elsewhere emphasise. */
+export function SideVenue({ side, venue }: { side: 'SHORT' | 'LONG'; venue: string }) {
+  const tone =
+    side === 'SHORT'
+      ? 'border-rose-500/15 bg-rose-500/[0.04] text-rose-400/70'
+      : 'border-emerald-500/15 bg-emerald-500/[0.04] text-emerald-400/70';
+  return (
+    <span
+      className={`num self-start rounded-md border px-2 py-0.5 text-[10px] font-medium tracking-wide ${tone}`}
+    >
+      {side} · {venue}
+    </span>
+  );
+}
+
 /** LONG / SHORT (or BUY / SELL) side chip. */
 export function SideChip({ side }: { side: string }) {
   const s = side.toUpperCase();

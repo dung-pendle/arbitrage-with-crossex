@@ -188,6 +188,10 @@ describe('buildStrategies — canonical 4-leg book', () => {
     // spread = 50_000 / (2M/2) = 5%; capital = perp IM 25k + boros balance 20k.
     expect(s.spread).toBeCloseTo(0.05, 10);
     expect(s.capitalUsd).toBeCloseTo(45_000, 6);
+    // The split the share page pies must sum back to the whole.
+    expect(s.capitalSplit.perpUsd).toBeCloseTo(25_000, 6);
+    expect(s.capitalSplit.borosUsd).toBeCloseTo(20_000, 6);
+    expect(s.capitalSplit.perpUsd + s.capitalSplit.borosUsd).toBeCloseTo(s.capitalUsd, 6);
     expect(s.lockedAprOnCapital).toBeCloseTo(50_000 / 45_000, 10);
 
     // Realized APR annualizes over the 12d since the earliest open.

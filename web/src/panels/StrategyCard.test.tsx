@@ -1,9 +1,11 @@
 /** StrategyCard is prop-driven — no msw/QueryClient needed. The canonical
  * hedged HYPE book lives in test/fixtures (mirrors the live strategy). */
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { CrossexPosition } from '../api/types';
+import { ToastProvider } from '../components/Toast';
+import { decodeSharePayload } from '../lib/shareCodec';
 import {
   makeCrossexPosition,
   makeStrategyLeg,
@@ -826,5 +828,69 @@ describe('StrategyCard — itemised entry cost', () => {
     expect(itemiseBtn()).toHaveTextContent('itemise'); // no count to show
     itemise();
     expect(screen.getByText(/couldn't be itemised/)).toBeInTheDocument();
+  });
+});
+
+describe('StrategyCard — share', () => {
+  const shareBtn = () => screen.queryByRole('button', { name: 'Share ↗' });
+
+  it('offers Share on a fully hedged, unmatured book', () => {
+    render(card());
+    expect(shareBtn()).toBeInTheDocument();
+  });
+
+  it('hides Share while the book is partial, unhedged, or matured', () => {
+    render(
+      card({
+        hedge: 'partial',
+        hedgeChecks: {
+          borosMatchRatio: 1,
+          perpMatchRatio: 0.5,
+          borosVsPerpRatio: 0.5,
+          fullyHedged: false,
+        },
+      }),
+    );
+    expect(shareBtn()).not.toBeInTheDocument();
+    cleanup();
+    render(card({ secondsToMaturity: 0 }));
+    expect(shareBtn()).not.toBeInTheDocument();
+  });
+
+  it('hides Share when the sizing checks fail even while hedge reads hedged', () => {
+    // hedge === 'hedged' with fullyHedged === false exercises the SECOND gate
+    // condition on its own — the partial-hedge case above short-circuits on the
+    // first and would mask a dropped fullyHedged check.
+    render(
+      card({
+        hedge: 'hedged',
+        hedgeChecks: {
+          borosMatchRatio: 1,
+          perpMatchRatio: 1,
+          borosVsPerpRatio: 0.5,
+          fullyHedged: false,
+        },
+      }),
+    );
+    expect(shareBtn()).not.toBeInTheDocument();
+  });
+
+  it('opens the share modal with the frozen snapshot on click', async () => {
+    render(<ToastProvider>{card()}</ToastProvider>);
+    await userEvent.click(screen.getByRole('button', { name: 'Share ↗' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('Share your position')).toBeInTheDocument();
+    // The link is the payload: it must decode, carry the displayed capital,
+    // and contain no address (whitelist-copy contract).
+    const input = screen.getByLabelText('Position share link') as HTMLInputElement;
+    const d = new URL(input.value).searchParams.get('d') ?? '';
+    const dec = decodeSharePayload(d);
+    expect(dec.ok).toBe(true);
+    if (dec.ok) {
+      expect(dec.payload.b).toBe('HYPE');
+      expect(dec.payload.c).toBe(41_320);
+      expect(dec.payload.l).toHaveLength(4);
+    }
+    expect(input.value).not.toMatch(/0x[a-fA-F0-9]{40}/);
   });
 });

@@ -309,6 +309,9 @@ export interface StrategyRollup {
     fullyHedged: boolean;
   };
   capitalUsd: number;
+  /** capitalUsd's two components: perp initial margin on CrossEx + the Boros
+   * margin apportioned to this strategy. Sums to capitalUsd by construction. */
+  capitalSplit: { perpUsd: number; borosUsd: number };
   /** Σ leg nets − entry slippage (pair-level). Perp price MtM is excluded. */
   realizedPnlUsd: number;
   /** Annualized on capital; null = too early to annualize / unknowable. */
