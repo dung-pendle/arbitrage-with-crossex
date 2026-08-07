@@ -291,6 +291,30 @@ describe('DealModal', () => {
     expect(screen.getByText(/unhedged dust/)).toBeInTheDocument();
     expect(screen.getByText('stopped')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    // An ordinary stop must NOT wear the crossing-limit explanation.
+    expect(screen.queryByText(/through the market/)).not.toBeInTheDocument();
+  });
+
+  it('DONE by a crossing limit: explains the failure and points at the order form', async () => {
+    renderModal(
+      makeDealView({
+        pair: {
+          mode: 'DONE',
+          reportJson: JSON.stringify({
+            aFilled: '0',
+            bFilled: '0',
+            unhedged: '0',
+            reason:
+              'the limit price kept crossing the market — the venue rejected the post-only maker 5 times in a row',
+          }),
+        },
+        projection: { aFilled: '0', bFilled: '0', unhedged: '0' },
+      }),
+    );
+    expect(
+      await screen.findByText(/the limit price was already through the market/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Try again from the order form with a fresh limit price/)).toBeInTheDocument();
   });
 
   it('DONE: labels each leg long/short with its venue + price, and the slippage', async () => {

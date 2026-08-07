@@ -379,6 +379,21 @@ export function DealModal({ dealId, onClose }: { dealId: string; onClose: () => 
               </div>
             ))}
 
+            {/* The one terminal cause the user can immediately fix: a limit
+                that was already through the market simply needs a fresh price.
+                The regex pins decide.ts's POC-budget reason text. */}
+            {report && /crossing the market/i.test(report.reason) && (
+              <div
+                role="alert"
+                className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-200"
+              >
+                <span className="font-semibold">
+                  The deal stopped — the limit price was already through the market.
+                </span>{' '}
+                Try again from the order form with a fresh limit price.
+              </div>
+            )}
+
             {/* Terminal report */}
             {report && (
               <div className="rounded-lg border border-ink-800 bg-ink-950/60 px-3 py-2 text-[11px] text-ink-300">
