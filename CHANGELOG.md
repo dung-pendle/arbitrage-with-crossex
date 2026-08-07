@@ -3,6 +3,34 @@
 Only substantial releases are listed here — each one bumps `version.json` (which is what the
 in-app update check compares against).
 
+## 1.3.0 — 2026-08-07
+
+Share a position, explain a stopped deal, and a Windows service that stays hidden.
+
+- **A fully hedged 4-leg position box grows a "Share ↗" button.** It renders a PNG card — "I'm
+  getting X% fixed APR on $Y capital" plus the four legs — and offers the link, the PNG, and an X
+  post pre-filled with the link. The numbers are frozen as you saw them, cost toggles included.
+- **The link is a page that explains the trade.** `crossexboros.com/position` draws how the four
+  legs hedge, the PnL waterfall and the capital split, with collapsible explainers, a roll-over /
+  close-perps toggle that re-derives every number, and a "self-reported, not verified" disclaimer.
+- **The whole snapshot travels in the URL.** The public page stores nothing — no database, no new
+  API route. The payload is strictly validated and copied field by field, with no free-text field
+  at all: your wallet address and the card's warnings have no path into a link, and leg sizes and
+  the open time are rounded so a share can't be joined against a public Boros fill.
+- **A deal that gives up on a crossing limit now says why.** After five post-only rejects — the
+  limit price was through the market, so the order could never rest — the report used to read a
+  bare "stopped". It now names the cause and points you back to the order form for a fresh price.
+- **The live deal graph shows what the hedge will pay.** While Leg A rests, the Leg B column draws
+  the market order the deal fires, sized to everything still unhedged and refreshed as it runs. A
+  simulation off the venue book, not a promised fill.
+- **The Windows background service no longer pops up a terminal window at logon** — and closing
+  that window used to kill the supervisor that restarts the server. Existing installs pick the fix
+  up by re-running the install command. It came in as a pull request from HubertHalim — thank you.
+- **Smaller things.** The Gate API-key steps name Gate's actual fields (Trading account, IP
+  Permissions "Later", Cross-Exchange with Read and Write); the README says why to leave the
+  machine on while a deal is open; modals open centred instead of clipped inside the header; and
+  CI now builds the public bundle too, guarding it against credential and trading-UI leakage.
+
 ## 1.2.0 — 2026-08-04
 
 Cost modelling, order handling, and dashboard legibility.
