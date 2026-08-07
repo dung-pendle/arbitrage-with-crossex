@@ -58,7 +58,7 @@ function utilText(pct: number): string {
 // Donut primitive (self-contained SVG — no chart library)
 // ---------------------------------------------------------------------------
 
-interface DonutSegment {
+export interface DonutSegment {
   value: number;
   /** Full Tailwind `stroke-*` class (must be a literal so JIT keeps it). */
   className: string;
@@ -68,9 +68,10 @@ interface DonutSegment {
 /**
  * Segments render clockwise from 12 o'clock. Pass `total` to size segments
  * against a whole larger than their sum (the remainder shows as the track) —
- * used for the "one highlighted slice vs balance" mini pie.
+ * used for the "one highlighted slice vs balance" mini pie. Shared: the
+ * account margin card here and the position page's capital pie.
  */
-function Donut({
+export function Donut({
   size,
   thickness,
   segments,

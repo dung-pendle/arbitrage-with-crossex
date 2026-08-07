@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { fx, fxFloorToStep, fxStr } from '../../src/engine/fx';
 import { clipBandPrice, decide, project, sizeFor } from '../../src/engine/decide';
-import type { OrderRow, PairRow } from '../../src/engine/types';
+import { TUNING, type OrderRow, type PairRow } from '../../src/engine/types';
 import type { DecideCtx } from '../../src/engine/decide';
 import { legSpec, A_CONTRACT, B_CONTRACT } from './engine-sim';
 
@@ -199,6 +199,14 @@ describe('decide edges', () => {
     const pair = pairRow({ deadlineAt: 1_000 });
     const p = project(pair, [order({ state: 'OPEN' })]);
     expect(decide(pair, p, 999_999_999, ctx)).toMatchObject({ type: 'setMode', mode: 'CONVERTING' });
+  });
+
+  it('exhausted POC budget: stops with the cause in haltReason, never a bare "stopped"', () => {
+    const pair = pairRow({ pocRejects: TUNING.MAX_POC_REJECTS });
+    const a = decide(pair, project(pair, []), 0, ctx);
+    expect(a).toMatchObject({ type: 'setMode', mode: 'STOPPING' });
+    // haltReason is what STOPPING's finishIfSettled writes into the report.
+    expect((a as { haltReason?: string }).haltReason).toMatch(/crossing the market/);
   });
 
   it('a venue cancel that is NOT ours is a STOP; our own cancel is not', () => {

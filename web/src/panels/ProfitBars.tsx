@@ -22,26 +22,16 @@
 import type { StrategyFees, StrategyLeg } from '../api/types';
 import {
   applyValueLabels,
+  buildCostWaterfallSteps,
   computeWaterfallScale,
-  costText,
   dashedAmber as dashed,
   dashedCyan,
-  dashedEmerald as dashedUp,
   WaterfallPlot as Plot,
+  type CostRow,
   type WaterfallStep as Step,
 } from '../components/Waterfall';
 import { fmtUsd } from '../lib/fmt';
 import type { CostFlags } from './strategyMath';
-
-const TITLES: Record<string, string> = {
-  'paid-perp-fees': 'Perp trading fees paid',
-  'paid-entry-slippage': 'Perp entry slippage paid',
-  'paid-boros-trade': 'Boros trading fees paid',
-  'paid-boros-settle': 'Boros settlement fees paid (est.)',
-  'future-boros-settle': 'Boros settlement fees to maturity (est.)',
-  'future-exit-fees': 'Perp exit fees (maker+hedge, est.)',
-  'future-exit-slippage': 'Perp exit slippage (assumed = entry, est.)',
-};
 
 export function ProfitBars({
   spreadReturnUsd,
@@ -88,7 +78,7 @@ export function ProfitBars({
   // FEES only when checked and > 0; exit SLIPPAGE when checked and non-null
   // (signed — a favorable value steps UP); both ENTRY parts only when this
   // strategy is charged them at all. Zero/null rows are skipped.
-  const costRows: Array<[string, number | null, string, string]> = [
+  const costRows: CostRow[] = [
     [
       'paid-perp-fees',
       chargedEntryFeesUsd,
@@ -120,53 +110,10 @@ export function ProfitBars({
     ],
   ];
 
-  const steps: Step[] = [];
   const showChart = spreadReturnUsd !== null && profitUsd !== null;
-  if (showChart) {
-    steps.push({
-      key: 'spread',
-      kind: 'total',
-      dir: 'up',
-      from: 0,
-      to: spreadReturnUsd,
-      className: 'bg-emerald-500',
-      title: `Spread return (locked) ${fmtUsd(spreadReturnUsd)}`,
-      axisLabel: 'Spread locked',
-    });
-    let level = spreadReturnUsd;
-    for (const [key, usd, cls, axisLabel] of costRows) {
-      if (usd === null || usd === 0) continue;
-      const from = level;
-      level -= usd; // signed: a negative cost raises the level
-      const isFuture = key.startsWith('future');
-      steps.push({
-        key,
-        kind: isFuture ? 'cost-future' : 'cost-paid',
-        dir: usd > 0 ? 'down' : 'up',
-        from,
-        to: level,
-        className: usd > 0 ? cls : isFuture ? dashedUp : 'bg-emerald-500/80',
-        title: `${TITLES[key]} ${costText(usd, isFuture || key === 'paid-boros-settle')}`,
-        axisLabel,
-      });
-    }
-    steps.push({
-      key: 'profit',
-      kind: 'total',
-      dir: profitUsd >= 0 ? 'up' : 'down',
-      from: 0,
-      to: profitUsd,
-      className: profitUsd >= 0 ? 'bg-emerald-500' : 'bg-rose-500',
-      title: `Net PnL by maturity ${fmtUsd(profitUsd)}`,
-      axisLabel: 'PnL',
-    });
-    // The end total is drawn at the authoritative profitUsd; the running level
-    // must land there by construction — warn (dev only) on any drift.
-    if (import.meta.env.DEV && Math.abs(level - profitUsd) > 0.01) {
-      // eslint-disable-next-line no-console
-      console.warn('waterfall identity drift (profit)', { level, profitUsd });
-    }
-  }
+  const steps: Step[] = showChart
+    ? buildCostWaterfallSteps({ spreadReturnUsd, profitUsd, costRows, devWarnLabel: 'profit' })
+    : [];
 
   // --- RIGHT: current-net ("now") steps -------------------------------------------
   // Component sums come from the LEGS — the exact inputs the server summed

@@ -369,7 +369,13 @@ export function decide(pair: PairRow, p: Projection, now: number, ctx: DecideCtx
         return finishIfSettled(pair, p, reason, hedgeSized);
       }
       if (pair.pocRejects >= TUNING.MAX_POC_REJECTS) {
-        return { type: 'setMode', mode: 'STOPPING', reason: 'post-only rejected repeatedly — market moving too fast' };
+        // The venue rejects a post-only order whose price would cross the book,
+        // so the maker never rested. haltReason carries the cause into the
+        // terminal report — STOPPING finishes with `haltReason ?? 'stopped'`,
+        // and a bare "stopped" hides the one failure the user can immediately
+        // fix (the modal keys its try-again guidance off this text).
+        const why = `the limit price kept crossing the market — the venue rejected the post-only maker ${TUNING.MAX_POC_REJECTS} times in a row`;
+        return { type: 'setMode', mode: 'STOPPING', reason: why, haltReason: why };
       }
       if (now < pair.makerNotBefore) return { type: 'idle', reason: 'maker backoff' };
       if (price === null || residual === null) {

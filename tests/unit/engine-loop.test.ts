@@ -274,7 +274,11 @@ describe('post-only handling', () => {
     await stepChecked(w, 20);
     const pair = w.store.getPair(w.pairId)!;
     expect(pair.mode).toBe('DONE'); // STOPPING with nothing filled settles to DONE
-    expect(JSON.parse(pair.reportJson!).aFilled).toBe('0');
+    const report = JSON.parse(pair.reportJson!) as { aFilled: string; reason: string };
+    expect(report.aFilled).toBe('0');
+    // The report must carry the cause, not a bare 'stopped' — the deal modal
+    // keys its "try again in the order form" guidance off this text.
+    expect(report.reason).toMatch(/crossing the market/);
   });
 });
 

@@ -58,6 +58,18 @@ function fmtCountdown(ms: number): string {
   return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${s}s`;
 }
 
+/** target − done as a positive plain-decimal string, else null — the size of
+ * the market order that would complete a leg right now. residualA cannot size
+ * these: an OPEN maker order reserves its FULL qty, so residualA reads 0 the
+ * whole time the maker rests — exactly when the graph is shown. */
+function remainderQty(target: string, done: string): string | null {
+  const t = Number(target);
+  const d = Number(done);
+  if (!Number.isFinite(t) || !Number.isFinite(d)) return null;
+  const r = t - d;
+  return r > 0 ? String(+r.toFixed(10)) : null;
+}
+
 /** Snap a typed re-peg price onto the venue tick (nearest), as a plain decimal
  * string — an off-tick POC would only bounce through venue rejects. Null when
  * the input isn't a positive number yet (the button stays disabled). */
@@ -219,7 +231,7 @@ export function DealModal({ dealId, onClose }: { dealId: string; onClose: () => 
                   (proj.makerOrder?.state === 'OPEN' ? proj.makerOrder.qty : null) ??
                   proj.residualA
                 }
-                residualQty={proj.residualA}
+                hedgeQty={remainderQty(pair.targetQty, proj.bReserved)}
               />
             )}
 
@@ -366,6 +378,21 @@ export function DealModal({ dealId, onClose }: { dealId: string; onClose: () => 
                 </button>
               </div>
             ))}
+
+            {/* The one terminal cause the user can immediately fix: a limit
+                that was already through the market simply needs a fresh price.
+                The regex pins decide.ts's POC-budget reason text. */}
+            {report && /crossing the market/i.test(report.reason) && (
+              <div
+                role="alert"
+                className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-200"
+              >
+                <span className="font-semibold">
+                  The deal stopped — the limit price was already through the market.
+                </span>{' '}
+                Try again from the order form with a fresh limit price.
+              </div>
+            )}
 
             {/* Terminal report */}
             {report && (

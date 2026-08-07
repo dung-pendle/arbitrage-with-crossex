@@ -24,6 +24,7 @@ import type {
   UpdateStatus,
   PerpEntryCostPart,
 } from '../api/types';
+import type { SharePayloadV1 } from '../lib/shareCodec';
 import { env } from './server';
 
 // Re-exported so the imports above stay live for the upcoming opportunity
@@ -381,6 +382,7 @@ export function makeStrategyRollup(overrides: Partial<StrategyRollup> = {}): Str
     hedge: 'hedged',
     hedgeChecks: { borosMatchRatio: 1, perpMatchRatio: 1, borosVsPerpRatio: 1, fullyHedged: true },
     capitalUsd: 41_320,
+    capitalSplit: { perpUsd: 33_056, borosUsd: 8_264 }, // sums to capitalUsd
     // Σ leg nets (−34.18 + 16.95 − 9.28 − 39.24) − entry slippage 49.16.
     realizedPnlUsd: -114.91,
     realizedApr: -0.553,
@@ -437,6 +439,38 @@ export function makeStrategyReturns(overrides: Partial<StrategyReturns> = {}): S
       ),
     },
     warnings: [],
+    ...overrides,
+  };
+}
+
+/** The canonical hedged HYPE book as a SHARE PAYLOAD — the wire form of the
+ * rollup above (17.81% on $41,320, 12 days to maturity, 4 legs). One factory so
+ * a schema change edits one literal instead of every position-page suite.
+ * The codec suites keep their own literals on purpose: they are the cross-tree
+ * drift pins (see tests/unit/share-codec-mirror.test.ts). */
+export function makeSharePayload(overrides: Partial<SharePayloadV1> = {}): SharePayloadV1 {
+  return {
+    v: 1,
+    b: 'HYPE',
+    t: STRATEGY_NOW,
+    m: STRATEGY_MATURITY,
+    cs: STRATEGY_OPENED,
+    a: 0.1781,
+    c: 41_320,
+    cp: 33_056,
+    cb: 8_264,
+    p: 282,
+    sp: 0.0707,
+    h: 'h',
+    ce: 1,
+    cx: 1,
+    l: [
+      { k: 'b', x: 'HYPERLIQUID', s: 'S', n: 158_800, r: 0.0936 },
+      { k: 'b', x: 'BYBIT', s: 'L', n: 158_800, r: 0.0229 },
+      { k: 'p', x: 'HYPERLIQUID', s: 'S', n: 160_300 },
+      { k: 'p', x: 'BYBIT', s: 'L', n: 160_300 },
+    ],
+    f: { pp: 65.01, ps: 49.16, pb: 3.77, pl: 1.6, fp: 80, fs: 49.16, fb: 10.06 },
     ...overrides,
   };
 }

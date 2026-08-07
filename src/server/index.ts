@@ -107,10 +107,15 @@ if (!publicMode) {
   engine = { store, venue: loopDeps.venue, clock: loopDeps.clock };
 }
 
+const webDist = path.join(repoRoot, 'web', 'dist');
+const positionHtml = path.join(webDist, 'position.html');
+
 const appDeps = {
   getClients,
   cache: new TtlCache(),
   publicMode,
+  // Only the landing build emits position.html; a terminal dist 404s /position.
+  positionPage: fs.existsSync(positionHtml) ? { htmlPath: positionHtml } : undefined,
   // Created on first boot beside the .env. Public mode has no credentialed
   // route to protect and serves strangers by design, so it carries none.
   authToken: publicMode ? undefined : readOrCreateApiToken(path.dirname(envPath)),
@@ -134,7 +139,6 @@ const appDeps = {
 const app = buildApp(appDeps);
 
 // Serve the built SPA when present (`yarn start`); in dev, Vite proxies /api here.
-const webDist = path.join(repoRoot, 'web', 'dist');
 if (fs.existsSync(path.join(webDist, 'index.html'))) {
   // The HTML is served BY US so the token can be injected; the hashed assets
   // still go through the static plugin. no-store (and no ETag) because a

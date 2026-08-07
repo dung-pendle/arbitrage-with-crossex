@@ -37,7 +37,7 @@ describe('DealModal', () => {
     expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
   });
 
-  it('OPENING: draws the live book graph — OUR limit, the convert-now fill, and the leg captions', async () => {
+  it('OPENING: draws the live book graph — OUR limit, the hedge market fill, and the leg captions', async () => {
     const previewCalls: ActionInput[][] = [];
     server.use(
       http.get('/api/books/:symbol', ({ params }) =>
@@ -53,15 +53,16 @@ describe('DealModal', () => {
             previews: actions.map((a, i) =>
               previewFor(a, {
                 index: i,
+                // A SELL fills below the touch — the hedge leg's estimate.
                 fillEstimate: {
                   qty: '0.05',
-                  avgPrice: 2501.6,
-                  worstPrice: 2502,
+                  avgPrice: 2497.4,
+                  worstPrice: 2497,
                   midPrice: 2500,
                   slippagePct: 0.06,
                   source: 'venue-orderbook',
                   confidence: 'high',
-                  venue: 'GATE',
+                  venue: 'BINANCE',
                 },
               }),
             ),
@@ -112,24 +113,116 @@ describe('DealModal', () => {
     ).toContain('limit 2497 × 0.05');
     expect(document.querySelector('[data-leg="short"] [data-mark="limit"]')).toBeNull();
     expect(document.querySelector('[data-leg="short"] [data-mark="bid"]')?.getAttribute('data-price')).toBe('2499');
-    // The tentative convert-now market fill for the unfilled remainder — a
-    // qty-sized preview of the residual, drawn as the maker column's mkt line.
+    // The hedge column carries its market-order simulation — the market hedge
+    // Leg B fires to cover everything Leg A acquires (target − reserved),
+    // matched back by symbol. The maker column shows NO market estimate: the
+    // deal's whole point is resting at the limit.
     await waitFor(
       () =>
         expect(
-          document.querySelector('[data-leg="long"] [data-mark="fill"]')?.getAttribute('data-price'),
-        ).toBe('2501.6'),
+          document.querySelector('[data-leg="short"] [data-mark="fill"]')?.getAttribute('data-price'),
+        ).toBe('2497.4'),
       { timeout: 4000 },
     );
+    expect(document.querySelector('[data-leg="long"] [data-mark="fill"]')).toBeNull();
+    expect(previewCalls.at(-1)).toHaveLength(1);
     expect(previewCalls.at(-1)?.[0]).toMatchObject({
       kind: 'open-market',
-      symbol: 'GATE_FUTURE_ETH_USDT',
-      side: 'BUY',
+      symbol: 'BINANCE_FUTURE_ETH_USDT',
+      side: 'SELL',
       qty: '0.05',
     });
     // Each column names its leg's role under the venue caption.
     expect(screen.getByText('Leg A — limit order')).toBeInTheDocument();
     expect(screen.getByText('Leg B — market hedge after every fill')).toBeInTheDocument();
+  });
+
+  it('OPENING: the hedge qty is target − reserved, float dust trimmed off the wire', async () => {
+    const previewCalls: ActionInput[][] = [];
+    server.use(
+      http.get('/api/books/:symbol', ({ params }) =>
+        HttpResponse.json(
+          env({ symbol: String(params.symbol), bestBid: 2499, bestAsk: 2501, mid: 2500 }),
+        ),
+      ),
+      http.post('/api/preview', async ({ request }) => {
+        const { actions } = (await request.json()) as { actions: ActionInput[] };
+        previewCalls.push(actions);
+        return HttpResponse.json(
+          env({
+            previews: actions.map((a, i) =>
+              previewFor(a, {
+                index: i,
+                fillEstimate: {
+                  qty: '0.03',
+                  avgPrice: 2497.4,
+                  worstPrice: 2497,
+                  midPrice: 2500,
+                  slippagePct: 0.06,
+                  source: 'venue-orderbook',
+                  confidence: 'high',
+                  venue: 'BINANCE',
+                },
+              }),
+            ),
+          }),
+        );
+      }),
+    );
+    renderModal(
+      makeDealView({
+        pair: { mode: 'OPENING' },
+        // The hedge still owes target − bReserved = 0.05 − 0.02, which floats
+        // to 0.030000000000000002 — the wire must carry '0.03' EXACTLY.
+        projection: { aFilled: '0.05', bReserved: '0.02', residualA: '0', unhedged: '0.03' },
+      }),
+    );
+    await waitFor(() => expect(document.querySelector('[data-price-graph]')).not.toBeNull());
+    await waitFor(
+      () =>
+        expect(
+          document.querySelector('[data-leg="short"] [data-mark="fill"]')?.getAttribute('data-price'),
+        ).toBe('2497.4'),
+      { timeout: 4000 },
+    );
+    expect(document.querySelector('[data-leg="long"] [data-mark="fill"]')).toBeNull();
+    expect(previewCalls.at(-1)).toHaveLength(1);
+    expect(previewCalls.at(-1)?.[0]).toMatchObject({
+      kind: 'open-market',
+      symbol: 'BINANCE_FUTURE_ETH_USDT',
+      side: 'SELL',
+      qty: '0.03',
+    });
+  });
+
+  it('OPENING single-leg (no hedge): the book graph renders with no preview at all', async () => {
+    const previewCalls: ActionInput[][] = [];
+    server.use(
+      http.get('/api/books/:symbol', ({ params }) =>
+        HttpResponse.json(
+          env({ symbol: String(params.symbol), bestBid: 2499, bestAsk: 2501, mid: 2500 }),
+        ),
+      ),
+      http.post('/api/preview', async ({ request }) => {
+        const { actions } = (await request.json()) as { actions: ActionInput[] };
+        previewCalls.push(actions);
+        return HttpResponse.json(
+          env({ previews: actions.map((a, i) => previewFor(a, { index: i })) }),
+        );
+      }),
+    );
+    renderModal(makeDealView({ pair: { mode: 'OPENING', b: null } }));
+    await waitFor(() => expect(document.querySelector('[data-price-graph]')).not.toBeNull());
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-leg="long"] [data-mark="limit"]')?.getAttribute('data-price'),
+      ).toBe('2500'),
+    );
+    // Past the 400ms preview debounce: with no hedge leg there is nothing to
+    // simulate, so no POST may ever fire.
+    await new Promise((r) => setTimeout(r, 700));
+    expect(previewCalls).toHaveLength(0);
+    expect(document.querySelector('[data-mark="fill"]')).toBeNull();
   });
 
   it('re-pegs to a custom price, snapped to the venue tick', async () => {
@@ -198,6 +291,30 @@ describe('DealModal', () => {
     expect(screen.getByText(/unhedged dust/)).toBeInTheDocument();
     expect(screen.getByText('stopped')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    // An ordinary stop must NOT wear the crossing-limit explanation.
+    expect(screen.queryByText(/through the market/)).not.toBeInTheDocument();
+  });
+
+  it('DONE by a crossing limit: explains the failure and points at the order form', async () => {
+    renderModal(
+      makeDealView({
+        pair: {
+          mode: 'DONE',
+          reportJson: JSON.stringify({
+            aFilled: '0',
+            bFilled: '0',
+            unhedged: '0',
+            reason:
+              'the limit price kept crossing the market — the venue rejected the post-only maker 5 times in a row',
+          }),
+        },
+        projection: { aFilled: '0', bFilled: '0', unhedged: '0' },
+      }),
+    );
+    expect(
+      await screen.findByText(/the limit price was already through the market/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Try again from the order form with a fresh limit price/)).toBeInTheDocument();
   });
 
   it('DONE: labels each leg long/short with its venue + price, and the slippage', async () => {

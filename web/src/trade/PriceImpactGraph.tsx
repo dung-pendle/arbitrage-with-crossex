@@ -474,17 +474,18 @@ export function PairBookImpact({
 
 /** Container for the LIVE DEAL view: the maker leg's real-time book with OUR
  * resting limit drawn on it, and the hedge leg's book alongside on the same
- * scale. The maker column also carries the TENTATIVE market fill — what the
- * unfilled remainder would average if converted to a market order right now
- * (a live qty-sized preview) — so "wait at the limit vs convert" reads as the
- * vertical gap between the two lines. Rendered by DealModal while OPENING. */
+ * scale. The hedge column also carries a TENTATIVE market fill — the market
+ * order Leg B fires to cover everything Leg A acquires, a live qty-sized
+ * preview, the same impact line the pair ticket draws before the deal starts.
+ * The maker column deliberately shows NO market estimate: the deal's whole
+ * point is resting at the limit. Rendered by DealModal while OPENING. */
 export function DealBookImpact({
   makerContract,
   makerSide,
   hedgeContract,
   limitPrice,
   limitQty,
-  residualQty,
+  hedgeQty,
 }: {
   makerContract: string;
   makerSide: 'BUY' | 'SELL';
@@ -493,20 +494,33 @@ export function DealBookImpact({
   limitPrice: string | null;
   /** The resting order's size (base qty) — labels the limit line. */
   limitQty: string | null;
-  /** The unfilled maker remainder (base qty) — sizes the convert-now estimate. */
-  residualQty: string | null;
+  /** Everything no hedge order covers yet (target − reserved, base qty) — the
+   * market order Leg B fires; sizes the hedge estimate. */
+  hedgeQty: string | null;
 }) {
   const makerBook = useVenueBook(makerContract, true);
   const hedgeBook = useVenueBook(hedgeContract, hedgeContract !== null);
 
-  // Tentative convert-now fill: preview a market order for the exact residual.
-  const residualNum = Number(residualQty);
-  const previewActions: ActionInput[] | null =
-    residualQty !== null && Number.isFinite(residualNum) && residualNum > 0
-      ? [{ kind: 'open-market', symbol: makerContract, side: makerSide, qty: residualQty }]
-      : null;
-  const preview = usePreviewDebounced('deal-residual', previewActions, { refetchInterval: 3_000 });
-  const fill = preview.previews?.[0]?.fillEstimate;
+  // Tentative hedge fill: preview the market order for everything still owed.
+  // The fill comes back BY SYMBOL, not by position — around a qty change the
+  // debounced query briefly serves the previous response (keepPreviousData).
+  const hedgeNum = Number(hedgeQty);
+  const actions: ActionInput[] =
+    hedgeContract !== null && hedgeQty !== null && Number.isFinite(hedgeNum) && hedgeNum > 0
+      ? [
+          {
+            kind: 'open-market',
+            symbol: hedgeContract,
+            side: makerSide === 'BUY' ? 'SELL' : 'BUY',
+            qty: hedgeQty,
+          },
+        ]
+      : [];
+  const preview = usePreviewDebounced('deal-residual', actions, { refetchInterval: 3_000 });
+  const hedgeFill =
+    actions.length > 0
+      ? preview.previews?.find((p) => p.symbol === hedgeContract)?.fillEstimate
+      : undefined;
 
   const limitNum = Number(limitPrice);
   const limitPx = limitPrice !== null && Number.isFinite(limitNum) && limitNum > 0 ? limitNum : null;
@@ -530,15 +544,20 @@ export function DealBookImpact({
 
   const makerLeg: LegImpact = {
     ...legFrom(makerContract, makerBook.data, makerIsLong ? 'LONG' : 'SHORT'),
-    avgFill: fill?.avgPrice ?? null,
-    worst: fill?.worstPrice ?? null,
-    partialDepth: Boolean(fill?.partialDepth),
     limitPx,
     limitQty: limitPx !== null ? limitQty : null,
     subLabel: 'Leg A — limit order',
   };
+  // The hedge mid falls back to the preview's reference price (as
+  // PairBookImpact does): without it a book outage would draw the fill line
+  // with impactPct null — toned the reassuring emerald no matter how hard the
+  // fill actually hits.
   const hedgeLeg: LegImpact = {
     ...legFrom(hedgeContract, hedgeBook.data, makerIsLong ? 'SHORT' : 'LONG'),
+    mid: hedgeBook.data?.mid ?? hedgeFill?.midPrice ?? null,
+    avgFill: hedgeFill?.avgPrice ?? null,
+    worst: hedgeFill?.worstPrice ?? null,
+    partialDepth: Boolean(hedgeFill?.partialDepth),
     subLabel: 'Leg B — market hedge after every fill',
   };
 

@@ -99,13 +99,15 @@ for a Gate.io API key:
    [gate.com/crossex](https://www.gate.com/crossex) — the API-key permission below and
    transfers into the CrossEx account need it switched on first.
 2. Log in at [gate.io](https://www.gate.com) → profile icon → **API Management** →
-   **Create API Key** (APIv4).
-3. Give the key **CrossEx (cross-exchange) trade permission** — that's all it needs.
-   **Leave Withdrawal OFF** (a trading bot never needs to withdraw your funds; the app
-   cannot move money off your account without it).
-4. Optional but recommended: bind the key to your home IP for extra protection. Caveat —
-   home IPs change from time to time (e.g. after a router restart), and the key stops
-   working until you update the binding. Skip this if that trade-off sounds annoying.
+   **Create API Key** (APIv4). When asked which account the key is for, choose
+   **Trading account**.
+3. Under **Permissions**, tick only **Cross-Exchange** with **Read and Write** — that's
+   all it needs. **Leave Withdrawal OFF** (a trading bot never needs to withdraw your
+   funds; the app cannot move money off your account without it).
+4. Under **IP Permissions**, choose **"Later"** — unless your machine has a consistent
+   IP, in which case binding the key to it adds extra protection. Caveat — home IPs
+   change from time to time (e.g. after a router restart), and the key stops working
+   until you update the binding.
 5. Paste the key + secret into the setup guide. The app validates them against Gate with
    a live read-only call before saving; they're stored only in
    `~/.boros-crossex/config/.env` (macOS) or `%LOCALAPPDATA%\CrossEx-Boros\config\.env`

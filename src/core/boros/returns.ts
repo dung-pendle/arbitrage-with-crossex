@@ -242,6 +242,10 @@ export interface StrategyRollup {
   /** Sizing gate for the headline numbers — see HedgeChecks. */
   hedgeChecks: HedgeChecks;
   capitalUsd: number;
+  /** capitalUsd's two components: the perp legs' initial margin on CrossEx +
+   * the Boros margin-group balance apportioned to this strategy. Sums to
+   * capitalUsd by construction. */
+  capitalSplit: { perpUsd: number; borosUsd: number };
   realizedPnlUsd: number;
   /** Annualized realized return on capital; null when too early / unknowable. */
   realizedApr: number | null;
@@ -712,7 +716,7 @@ function assembleStrategy(
   // apportion each margin group's netBalance (cash actually posted) across
   // its positions by initial-margin share — a group can back several
   // strategies, so never count its full balance more than once.
-  let capitalUsd = perpBuilds.reduce((s, b) => s + b.imUsd, 0);
+  const perpCapitalUsd = perpBuilds.reduce((s, b) => s + b.imUsd, 0);
   const byGroup = new Map<string, { balance: number; groupIm: number; strategyIm: number }>();
   for (const b of borosBuilds) {
     const entry = byGroup.get(b.groupKey) ?? {
@@ -723,9 +727,11 @@ function assembleStrategy(
     entry.strategyIm += b.positionInitialMarginUsd;
     byGroup.set(b.groupKey, entry);
   }
+  let borosCapitalUsd = 0;
   for (const g of byGroup.values()) {
-    capitalUsd += g.groupIm > 0 ? g.balance * (g.strategyIm / g.groupIm) : g.balance;
+    borosCapitalUsd += g.groupIm > 0 ? g.balance * (g.strategyIm / g.groupIm) : g.balance;
   }
+  const capitalUsd = perpCapitalUsd + borosCapitalUsd;
 
   // --- Strategy clock -----------------------------------------------------------
   // The strategy starts when its BOROS legs lock the spread (default). Perp
@@ -987,6 +993,7 @@ function assembleStrategy(
     hedge,
     hedgeChecks,
     capitalUsd,
+    capitalSplit: { perpUsd: perpCapitalUsd, borosUsd: borosCapitalUsd },
     realizedPnlUsd,
     realizedApr,
     spread,

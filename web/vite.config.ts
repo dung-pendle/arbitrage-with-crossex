@@ -37,7 +37,7 @@ function landingHtml(): PluginOption {
     transformIndexHtml: {
       // 'pre' so the entry swap happens before Vite discovers the module graph.
       order: 'pre',
-      handler(html: string) {
+      handler(html: string, ctx: { path: string }) {
         const analytics = GA_ID
           ? [
               `    <script async src="https://www.googletagmanager.com/gtag/js?id=${GA_ID}"></script>`,
@@ -49,6 +49,25 @@ function landingHtml(): PluginOption {
               `    </script>`,
             ]
           : [];
+        // The position entry keeps its title/description/OG in source (between
+        // the server's replaceable position-meta markers — see position.html);
+        // the build adds only what needs the deployed origin (canonical, og:url,
+        // og:image — kept OUTSIDE the marker block so the server's per-request
+        // replacement can never destroy them) plus the GA tag. Share-link
+        // traffic lands exactly here, so it is measured like the landing.
+        if (ctx.path.endsWith('position.html')) {
+          const extras = [
+            ...(LANDING_URL
+              ? [
+                  `    <link rel="canonical" href="${LANDING_URL}/position" />`,
+                  `    <meta property="og:url" content="${LANDING_URL}/position" />`,
+                  `    <meta property="og:image" content="${LANDING_URL}/position-og.png" />`,
+                ]
+              : []),
+            ...analytics,
+          ];
+          return extras.length ? html.replace('  </head>', [...extras, '  </head>'].join('\n')) : html;
+        }
         const canonical = LANDING_URL
           ? [
               `    <link rel="canonical" href="${LANDING_URL}" />`,
@@ -99,6 +118,24 @@ export default defineConfig(({ mode }) => ({
   base: mode === 'landing' ? './' : '/',
   plugins: [react(), ...(mode === 'landing' ? [landingHtml()] : [])],
   define: mode === 'landing' ? { 'import.meta.env.VITE_LANDING': JSON.stringify('1') } : {},
+  // public/ holds landing-only assets (the position OG card) — keep them out
+  // of the terminal (money-app) dist entirely.
+  publicDir: mode === 'landing' ? 'public' : false,
+  // The landing build carries a second HTML entry: the shared-position page.
+  // Landing-only — the terminal generates links TO the public deployment, so
+  // its own dist has no consumer for the page (and its single-input config
+  // stays untouched). Object form so a later entry is a one-line addition.
+  build:
+    mode === 'landing'
+      ? {
+          rollupOptions: {
+            input: {
+              index: fileURLToPath(new URL('./index.html', import.meta.url)),
+              position: fileURLToPath(new URL('./position.html', import.meta.url)),
+            },
+          },
+        }
+      : {},
   server: {
     // Both overridable so a dev stack can run BESIDE the installed app instead
     // of fighting it for 6688. PORT drives the proxy target too: with a

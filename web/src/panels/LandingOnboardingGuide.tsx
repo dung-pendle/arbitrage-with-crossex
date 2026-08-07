@@ -120,10 +120,12 @@ export function LandingOnboardingGuide() {
             margin account.
           </Step>
           <Step n={5} title="Create your API key" {...step(5)}>
-            In <Ext href={GATE_API_KEYS_URL}>API Management</Ext>, create an APIv4 key with CrossEx
-            trade permission only; leave Withdrawal off. Paste it into the setup guide of your
-            locally-running terminal at <Ext href={LOCAL_APP_URL}>localhost:6688</Ext> — keys stay
-            on your machine and never touch this website.
+            In <Ext href={GATE_API_KEYS_URL}>API Management</Ext>, create an APIv4 key for your
+            Trading account. Set IP Permissions to “Later” (unless your machine has a consistent
+            IP), and under Permissions tick only Cross-Exchange with Read and Write; leave
+            Withdrawal off. Paste it into the setup guide of your locally-running terminal
+            at <Ext href={LOCAL_APP_URL}>localhost:6688</Ext> — keys stay on your machine and
+            never touch this website.
           </Step>
           <Step n={6} title="Execute" {...step(6)}>
             Hit Execute on any card; all four legs land pre-filled.

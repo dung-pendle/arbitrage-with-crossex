@@ -45,6 +45,9 @@ import { PerpLegExpanded } from './PerpLegExpanded';
 import { ProfitBars } from './ProfitBars';
 import { EntryCostParts } from './EntryCostParts';
 import { loadExcludedPartIds, saveExcludedPartIds, strategyKey } from './entryPartsStore';
+import { buildSharePayload } from './sharePayload';
+import { SharePositionModal } from './SharePositionModal';
+import type { SharePayloadV1 } from '../lib/shareCodec';
 import { applyCostFlags, SECONDS_IN_YEAR, type CostFlags } from './strategyMath';
 
 function HedgeChip({ s }: { s: StrategyRollup }) {
@@ -144,6 +147,9 @@ export function StrategyCard({
     loadExcludedPartIds(partsKey),
   );
   const [partsOpen, setPartsOpen] = useState(false);
+  // The share snapshot is built at click time and frozen — the 30s strategy
+  // refetch can't mutate an open share modal.
+  const [sharePayload, setSharePayload] = useState<SharePayloadV1 | null>(null);
   const partsId = `entry-parts-${partsKey}`;
   const entryParts = s.perpEntryCostParts ?? [];
   const toggleEntryPart = (partId: string) => {
@@ -306,6 +312,17 @@ export function StrategyCard({
   const borosNotionalPerSide = borosLegs.reduce((sum, l) => sum + l.notionalUsd, 0) / 2;
   const matured = s.secondsToMaturity === 0;
   const borosOnly = perpLegs.length === 0 && perpSource !== null;
+  // Share is offered only where the card itself shows the headline numbers: a
+  // fully hedged, unmatured book with a knowable APR. The payload snapshots
+  // the DISPLAYED values (post-applyCostFlags), so the link says what the
+  // sharer saw. Everything present-tense on the card ("I'm getting") would lie
+  // about a matured book, hence the gate.
+  const canShare =
+    s.hedge === 'hedged' &&
+    checks.fullyHedged &&
+    !matured &&
+    fixedAprOnCapital !== null &&
+    expectedUsd !== null;
 
   // Content-based row keys: expanded-row state must follow the LEG, not its
   // index (a leg set change between refetches would silently remap indexes).
@@ -485,7 +502,29 @@ export function StrategyCard({
             ({checks.fullyHedged ? fmtPct(s.spread) : '—'} spread)
           </span>
         </div>
-        <HedgeChip s={s} />
+        <div className="flex items-center gap-2">
+          {canShare && (
+            <button
+              type="button"
+              title="Share this position — a public link + image; your wallet address is not included"
+              onClick={() =>
+                setSharePayload(
+                  buildSharePayload({
+                    s,
+                    fixedAprOnCapital,
+                    expectedUsd,
+                    flags,
+                    nowSec: Math.floor(Date.now() / 1000),
+                  }),
+                )
+              }
+              className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[11px] font-medium text-cyan-300 transition-colors hover:border-cyan-400 hover:bg-cyan-500/20 hover:text-cyan-200"
+            >
+              Share ↗
+            </button>
+          )}
+          <HedgeChip s={s} />
+        </div>
       </div>
 
       <Notes items={s.warnings} className="mt-2" />
@@ -782,6 +821,10 @@ export function StrategyCard({
         <div className="mt-2 text-[10px] text-ink-500">
           Boros legs from the entered address — connect Gate keys to overlay perp legs 1–2
         </div>
+      )}
+
+      {sharePayload && (
+        <SharePositionModal payload={sharePayload} onClose={() => setSharePayload(null)} />
       )}
     </div>
   );

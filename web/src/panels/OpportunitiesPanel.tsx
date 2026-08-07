@@ -35,6 +35,7 @@ import { QueryError } from '../components/QueryError';
 import { SegmentedToggle } from '../components/SegmentedToggle';
 import { Skeleton } from '../components/Skeleton';
 import { microLabelClass } from '../components/Th';
+import { SideVenue } from '../components/VenueChip';
 import { borosMarketUrl } from '../lib/boros';
 import { fmtAge, fmtDateUtc, fmtNotionalShort, fmtPct, fmtTokenQty, fmtUsd, sig } from '../lib/fmt';
 import { IS_LANDING } from '../lib/landing';
@@ -333,22 +334,6 @@ function LegRow({
       </span>
       <span className="text-[11.5px] text-ink-300">{note}</span>
     </div>
-  );
-}
-
-/** SHORT / LONG venue badge of the collapsed asset line. Deliberately faint —
- * a directional hint that must not compete with the APR/capital numbers. */
-function SideVenue({ side, venue }: { side: 'SHORT' | 'LONG'; venue: string }) {
-  const tone =
-    side === 'SHORT'
-      ? 'border-rose-500/15 bg-rose-500/[0.04] text-rose-400/70'
-      : 'border-emerald-500/15 bg-emerald-500/[0.04] text-emerald-400/70';
-  return (
-    <span
-      className={`num self-start rounded-md border px-2 py-0.5 text-[10px] font-medium tracking-wide ${tone}`}
-    >
-      {side} · {venue}
-    </span>
   );
 }
 
