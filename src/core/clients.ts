@@ -10,6 +10,12 @@ import { CoreError } from './errors';
  * safe by design (probe-and-resolve, never guess). */
 const HTTP_TIMEOUT_MS = 15_000;
 
+/** Gate Broker Program channel id, sent as X-Gate-Channel-Id on every signed
+ * request so Gate can attribute this tool's order flow (the same mechanism
+ * CCXT and Hummingbot use). Inert until Gate registers the id to us —
+ * unregistered values are ignored server-side. */
+const GATE_CHANNEL_ID = 'boros';
+
 export interface Clients {
   api: ApiClient;
   crossEx: CrossExApi;
@@ -38,6 +44,9 @@ export function makeClients(creds?: Credentials): Clients {
   }
   const api = new ApiClient(undefined, axios.create({ timeout: HTTP_TIMEOUT_MS }));
   api.setApiKeySecret(key, secret);
+  // Mutate rather than assign: the SDK's defaultHeaders setter replaces the
+  // whole object, which would drop its stock X-Gate-Size-Decimal header.
+  api.defaultHeaders['X-Gate-Channel-Id'] = GATE_CHANNEL_ID;
   return {
     api,
     crossEx: new CrossExApi(api),
