@@ -80,6 +80,12 @@ function landingHtml(): PluginOption {
           .replace(
             '  </head>',
             [
+              // Lets the landing be deployed under a sub-path (e.g. /crossex):
+              // the relative './assets' + './api' URLs need a trailing slash
+              // on the document URL, so the page appends one to its own URL
+              // before any module runs. Index only — position.html resolves
+              // correctly without it.
+              `    <script>if(!location.pathname.endsWith('/'))location.replace(location.pathname+'/'+location.search+location.hash);</script>`,
               `    <meta name="description" content="${LANDING_DESCRIPTION}" />`,
               `    <meta property="og:title" content="${LANDING_TITLE}" />`,
               `    <meta property="og:description" content="${LANDING_DESCRIPTION}" />`,
