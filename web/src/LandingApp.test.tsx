@@ -1,8 +1,10 @@
-/** The public shell: live opportunities on the left, the collapsed setup rail on
- * the right. Hitting Execute has nowhere to go on this page, so it nudges the
- * install command instead — which now lives inside a collapsed step. */
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+/** The public shell (Variant A — "the number leads"): a bare hero number, the
+ * live 4-leg diagram that explains it, a shop-window spreads list, "three
+ * things you need" as the page's only setup surface, and an FAQ holding the
+ * caveats. The old step-by-step rail (LandingOnboardingGuide) was folded into
+ * the three cards and deleted — the terminal's own OnboardingGuide is a
+ * different component and is untouched. */
+import { screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { LandingApp } from './LandingApp';
 import { baseHandlers, makeOpportunitiesResult, opportunitiesHandler } from './test/fixtures';
@@ -10,27 +12,49 @@ import { server } from './test/server';
 import { renderWithClient } from './test/utils';
 
 describe('LandingApp', () => {
-  it('Execute re-opens the install step when the visitor has closed it, and flashes it', async () => {
+  it('renders the scroll narrative: hero, live mechanism, spreads, 3 things, FAQ', async () => {
     server.use(...baseHandlers(), opportunitiesHandler(makeOpportunitiesResult()));
     renderWithClient(<LandingApp />);
 
-    // Step 1 is open by default; close it the way a visitor would.
-    const install = await screen.findByRole('button', { name: /^Install the terminal/ });
-    expect(install).toHaveAttribute('aria-expanded', 'true');
-    await userEvent.click(install);
-    expect(install).toHaveAttribute('aria-expanded', 'false');
+    // The h1 spans two lines ("…arbitrage." / "Leveraged."), so match the
+    // heading by role rather than its full text.
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /funding rate arbitrage/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Also live')).toBeInTheDocument();
+    expect(screen.getByText('Three things you need')).toBeInTheDocument();
+    expect(screen.getByText('Questions & caveats')).toBeInTheDocument();
+    expect(screen.getByText('The terminal')).toBeInTheDocument();
+  });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Execute it' }));
+  it('states the caveats without a doubt-first headline', async () => {
+    server.use(...baseHandlers(), opportunitiesHandler(makeOpportunitiesResult()));
+    renderWithClient(<LandingApp />);
+    await screen.findByRole('heading', { level: 1, name: /funding rate arbitrage/i });
 
-    // Nothing to flash unless the step holding the command is re-opened first.
-    await waitFor(() => expect(install).toHaveAttribute('aria-expanded', 'true'));
-    await waitFor(() => expect(document.querySelector('.flash-ring')).not.toBeNull());
+    // The concerns survived the move into the FAQ...
+    expect(screen.getByText('Who built this?')).toBeInTheDocument();
+    expect(screen.getByText('Who holds my funds and keys?')).toBeInTheDocument();
+    expect(screen.getByText('Can it lose money?')).toBeInTheDocument();
+    // ...but the section no longer leads with the objection as a headline.
+    expect(screen.queryByText('Before you trust it with a key')).toBeNull();
+  });
+
+  it('has one setup surface, not a duplicate step rail', async () => {
+    server.use(...baseHandlers(), opportunitiesHandler(makeOpportunitiesResult()));
+    renderWithClient(<LandingApp />);
+    await screen.findByText('Three things you need');
+
+    expect(screen.queryByText("Ready? Here's every step")).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Install the terminal/ })).toBeNull();
+    // The rail's instructions still exist — inside the cards.
+    expect(screen.getByText('Cross-Exchange, Read and Write')).toBeInTheDocument();
   });
 
   it('exposes no credential surface anywhere on the public shell', async () => {
     server.use(...baseHandlers(), opportunitiesHandler(makeOpportunitiesResult()));
     renderWithClient(<LandingApp />);
-    await screen.findByRole('button', { name: /^Install the terminal/ });
+    await screen.findByText('Three things you need');
 
     expect(screen.queryByLabelText(/API key/i)).toBeNull();
     expect(screen.queryByLabelText(/API secret/i)).toBeNull();

@@ -18,7 +18,11 @@ export const INSTALL_CMD_WINDOWS =
  * the source is right there" — this hands the visitor a concrete way to act on
  * that before any key exists. Questions are the ones that actually matter for a
  * tool that holds exchange keys, and it asks for citations so the answer can be
- * checked rather than believed. */
+ * checked rather than believed.
+ *
+ * The URL here must match REPO_URL above: this prompt renders one FAQ row below
+ * a link built from it, and two different repo URLs for the same project is
+ * exactly the doubt the prompt exists to remove. */
 export const AUDIT_PROMPT = `Audit this open-source tool for me before I run it:
 https://github.com/pendle-finance/crossex-boros-terminal
 
