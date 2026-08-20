@@ -1,5 +1,5 @@
 /** Share-position payload codec — the wire format behind
- * `crossexboros.com/position?d=<encoded>`.
+ * `boros.pendle.finance/arbitrage-crossex/position?d=<encoded>`.
  *
  * The payload is a compact short-key JSON snapshot of one 4-leg position,
  * base64url-encoded into the URL itself: the public box stores nothing, so the
@@ -10,11 +10,15 @@
  * is what keeps addresses/symbols/warnings out of the wire format by
  * construction.
  *
- * BYTE-IDENTICAL MIRROR: this file exists as both src/core/share/codec.ts
- * (server) and web/src/lib/shareCodec.ts (browser) — the repo forbids
- * cross-tree imports, so the copies must stay equal byte-for-byte and
- * tests/unit/share-codec-mirror.test.ts fails the build when they drift.
- * Edit one, copy over the other. Everything here is environment-neutral:
+ * CROSS-REPO MIRROR — UNGUARDED, the riskiest thing about this file. This
+ * terminal only ENCODES; the page that DECODES lives in the separate
+ * arbitrage-landing repo, which keeps its own byte-identical copies at
+ * web/src/lib/shareCodec.ts and src/core/share/codec.ts. That repo's
+ * shareCodec.mirror.test.ts pins ITS two copies to each other — nothing pins
+ * them to THIS one, because no test can span two repos. So a change here that
+ * is not copied there silently breaks every link this terminal emits. Edit
+ * this file only together with the landing repo's copies, and keep all three
+ * byte-identical. Everything here is environment-neutral:
  * TextEncoder/TextDecoder + a hand-rolled base64url — no Buffer, no atob.
  *
  * ADDITIVE FIELDS (like a leg's optional tn/ts): a decoder built before a
