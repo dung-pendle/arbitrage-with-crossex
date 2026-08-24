@@ -48,20 +48,46 @@ function floorTo1Sf(x: number): number {
 
 export function CloseBorosForm({
   legs,
+  onClosed,
   onDone,
 }: {
   legs: StrategyLeg[];
+  /**
+   * What actually came off each market, so the caller can shrink a claim that
+   * states an absolute size.
+   *
+   * The EXACT filled size, not the requested one — unlike a perp close, this
+   * route answers with the fill, so a leg that came back short shrinks the
+   * claim by what it really closed. Fires for a partial too: those are the
+   * ones where the number matters.
+   */
+  onClosed?: (leg: StrategyLeg, filled: number) => void;
   onDone?: () => void;
 }) {
   const close = useBorosCancelAndClose();
   const agent = useBorosAgent();
   const { address } = useTrackedAddress();
-  const [done, setDone] = useState<number[]>([]);
+  /**
+   * Legs whose close filled everything it ASKED for, with whatever the venue
+   * still holds afterwards.
+   *
+   * ⚠ NOT the same as the venue going flat, which is what `closed` reports.
+   * A card closing its own share of a shared leg satisfies its request while
+   * the leg stays open, and so does a dust residual — `closed` is
+   * `shortfall === 0 && size >= openSize`, an exact comparison a size like
+   * 419.49999999 fails. Keying the done panel off `closed` meant a close that
+   * did exactly what was asked reported itself as unfinished: one small amber
+   * line, the confirm button still armed at the same size, and "close again to
+   * finish it" for a leg with nothing left to finish. The dialog answers the
+   * question the user asked it, and mentions the venue residual separately.
+   */
+  const [done, setDone] = useState<{ marketId: number; yours: number; others: number }[]>([]);
   const [failed, setFailed] = useState<{ marketId: number; message: string }[]>([]);
-  /** Filled, but the leg is still open — a partial by request or by depth. */
-  const [partial, setPartial] = useState<
-    { marketId: number; filled: number; shortfall: number }[]
-  >([]);
+  /** Filled SHORT of what was asked — the book ran out inside the rate bound.
+   * `left` is what of this request is still open, never `shortfallSize`
+   * dressed up: that is requested − filled, which is the same number only when
+   * the request covered the whole venue position. */
+  const [partial, setPartial] = useState<{ marketId: number; filled: number; left: number }[]>([]);
 
   const closable = useMemo(() => legs.filter((l) => l.marketId !== undefined), [legs]);
 
@@ -196,17 +222,35 @@ export function CloseBorosForm({
     : 'The Boros agent approval has expired — approve a new agent key before closing Boros legs.';
 
   const allDone = closable.length > 0 && done.length === closable.length;
+  /**
+   * What the venue still holds on legs that DID satisfy their request, split
+   * by WHOSE it is.
+   *
+   * ⚠ Two different remainders, and reporting them as one told the user a
+   * falsehood about their own money: `openSize − filled` is `(openSize −
+   * myShare)`, which belongs to whoever else holds the leg, PLUS `(myShare −
+   * filled)`, which is theirs and was left open on purpose. Closing 0.004 of a
+   * sole-owned 0.01 announced that the remaining 0.006 was "another position's
+   * share, not yours".
+   */
+  const residualYours = done.reduce((sum, d) => sum + d.yours, 0);
+  const residualOthers = done.reduce((sum, d) => sum + d.others, 0);
 
   const run = async () => {
     setFailed([]);
     setPartial([]);
     for (const l of closable) {
       const id = l.marketId as number;
-      if (done.includes(id)) continue;
+      if (done.some((d) => d.marketId === id)) continue;
+      const requested = sizeOf(l).value;
+      // The same tolerance the depth warning uses: a book that fully covers
+      // 419.5 answers 419.49999999, and calling that a shortfall reads as "no
+      // depth" on a market with plenty.
+      const dust = Math.max(1e-6, requested * 1e-6);
       try {
         const r = await close.mutateAsync({
           marketId: id,
-          size: sizeOf(l).value,
+          size: requested,
           slippageApr: slipPct / 100,
         });
         /**
@@ -230,19 +274,31 @@ export function CloseBorosForm({
                 : 'Nothing was closed.',
             },
           ]);
-        } else if (!r.closed) {
-          // Filled, but not to flat: a deliberate partial, or the book ran out
-          // inside the rate bound. Either way the leg is still open.
-          setPartial((prev) => [
-            ...prev,
-            {
-              marketId: id,
-              filled: r.fill!.filledSize,
-              shortfall: r.fill!.shortfallSize,
-            },
-          ]);
+        } else if (r.fill!.filledSize < requested - dust) {
+          // SHORT of what was asked: the book ran out inside the rate bound.
+          // The only outcome that leaves something for a second press — so it
+          // is also the only one that re-seeds the size, below, rather than
+          // leaving the original amount armed under a line saying it is done.
+          const filled = r.fill!.filledSize;
+          const left = requested - filled;
+          setPartial((prev) => [...prev, { marketId: id, filled, left }]);
+          setSizes((prev) => ({ ...prev, [id]: String(Number(left.toPrecision(8))) }));
+          onClosed?.(l, filled);
         } else {
-          setDone((prev) => [...prev, id]);
+          // Everything asked for came off. What the venue still holds splits
+          // in two, and only one half is somebody else's — worth SAYING,
+          // neither worth arming a second close over.
+          const filled = r.fill!.filledSize;
+          const mine = l.notionalToken ?? filled;
+          // This card's own share that the user chose not to close.
+          const yours = Math.max(0, mine - filled);
+          // The rest of the venue leg, which other positions hold.
+          const others = Math.max(0, (r.openSize ?? mine) - mine);
+          setDone((prev) => [
+            ...prev,
+            { marketId: id, yours: yours > dust ? yours : 0, others: others > dust ? others : 0 },
+          ]);
+          onClosed?.(l, filled);
         }
       } catch (err) {
         setFailed((prev) => [
@@ -260,12 +316,29 @@ export function CloseBorosForm({
   // A close that landed says so, and stays said until dismissed — the dialog
   // closing on its own gave no confirmation that anything had happened.
   if (allDone) {
+    const unit = closable[0]?.collateral ?? '';
     return (
       <div className="flex flex-col gap-3">
         <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5 text-[12px] leading-relaxed text-emerald-300">
           {closable.length === 1 ? 'Leg closed.' : `${closable.length} legs closed.`} The position is
           re-reading from the venue now — the card updates on its own.
         </p>
+        {/* The venue leg outliving the close is normal. Said plainly and NOT
+            as an amber warning: nothing went wrong. But the two halves are
+            not interchangeable — one is the user's to close whenever they
+            like, the other is not theirs at all. */}
+        {residualYours > 0 && (
+          <p className="text-[11px] leading-relaxed text-ink-400">
+            {fmtTokenQty(residualYours, unit)} of this position is still open — you closed part of
+            it. Close the rest whenever you like.
+          </p>
+        )}
+        {residualOthers > 0 && (
+          <p className="text-[11px] leading-relaxed text-ink-400">
+            {fmtTokenQty(residualOthers, unit)} more is open on the venue — that is another
+            position's share of the same leg, not yours.
+          </p>
+        )}
         <button type="button" className="btn-primary w-full" onClick={onDone}>
           Done
         </button>
@@ -363,8 +436,9 @@ export function CloseBorosForm({
               )}
               {part && (
                 <span className="text-amber-400/90">
-                  filled {fmtTokenQty(part.filled, unit)} — {fmtTokenQty(part.shortfall, unit)} left
-                  open. Close again to finish it.
+                  filled {fmtTokenQty(part.filled, unit)} — {fmtTokenQty(part.left, unit)} of what
+                  you asked for is still open. The size above is set to what is left; close again
+                  to finish it.
                 </span>
               )}
               {err && <span className="text-rose-400">{err.message}</span>}

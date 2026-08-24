@@ -6,12 +6,14 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
-import type { PositionsResponse, StrategyReturns } from '../api/types';
+import type { ActionInput, PositionsResponse, StrategyReturns } from '../api/types';
 import {
+  makeCrossexPosition,
   makeExposureGroup,
   makeStrategyLeg,
   makeStrategyReturns,
   makeStrategyRollup,
+  previewFor,
   versionHandler,
 } from '../test/fixtures';
 import { env, server } from '../test/server';
@@ -396,7 +398,7 @@ describe('PositionsHome — a book split across strategies', () => {
         // leg, not a footnote beside them — same card, same controls.
         makeStrategyRollup({
           strategyId: 'HYPE#unhedged:HYPERLIQUID_FUTURE_HYPE_USDC',
-          attribution: { source: 'unhedged', confidence: 'measured', pinned: false },
+          attribution: { source: 'unhedged', confidence: 'measured', pinned: false, unclaimed: true },
           hedge: 'unhedged',
           maturity: 0,
           legs: sharedLegs()
@@ -523,6 +525,51 @@ describe('PositionsHome — a book split across strategies', () => {
     });
   });
 
+  /** Every positionId currently written for this book. */
+  const storedIds = (): string[] => [
+    ...new Set(
+      ((JSON.parse(localStorage.getItem('crossex.partition.v1') ?? '{}')[BOOK]?.rows ??
+        []) as Array<{ positionId?: string }>)
+        .map((r) => r.positionId)
+        .filter((x): x is string => typeof x === 'string'),
+    ),
+  ];
+
+  it('mints ONE id when a single Confirm carries both an entry and a size', async () => {
+    /**
+     * ⚠ ONE CONFIRM IS ONE CHANGE, however many facts it carries.
+     *
+     * `commit()` emits `entry` and then `assign` as two `applyAssertion`
+     * calls. Each one froze the card by re-reading `attribution.pinned` off
+     * the SAME rollup prop — still false, because no server response has
+     * landed in between — so the second minted a second id and wrote a second
+     * full row set. Every leg was then claimed by two ids at once, which the
+     * server duly split down the middle into two phantom positions, with the
+     * asserted entry hanging off whichever half went first.
+     */
+    track();
+    mockPositions();
+    mockStrategy(splitReturns());
+    renderWithClient(<PositionsHome />);
+    await screen.findByText('split unconfirmed');
+
+    // Stay on this card (so the entry question is asked) and change BOTH.
+    openAssign();
+    fireEvent.change(screen.getByLabelText(/size for this position/), { target: { value: '175' } });
+    fireEvent.change(screen.getByLabelText(/entry price for this position/), {
+      target: { value: '2461' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(storedIds().length).toBeGreaterThan(0));
+    // One card, one id — not two halves of one card.
+    expect(new Set(storedIds()).size).toBe(1);
+    // …and the entry belongs to the id that actually holds the legs.
+    const overrides = JSON.parse(localStorage.getItem('crossex.entryOverride.v1') ?? '{}')[BOOK]
+      ?.rows as Array<{ positionId: string }> | undefined;
+    expect(overrides?.[0]?.positionId).toBe(storedIds()[0]);
+  });
+
   it('freezes what the solver proposed, then applies the correction', async () => {
     // The first assertion on a proposed card mints an id and writes a row for
     // every leg it already had — otherwise correcting one leg would hand the
@@ -626,7 +673,7 @@ describe('PositionsHome — membership journeys', () => {
           ...loose.map((l) =>
             makeStrategyRollup({
               strategyId: `${l.base}#unhedged:${l.symbol}`,
-              attribution: { source: 'unhedged', confidence: 'measured', pinned: false },
+              attribution: { source: 'unhedged', confidence: 'measured', pinned: false, unclaimed: true },
               hedge: 'unhedged',
               maturity: 0,
               legs: [l],
@@ -944,5 +991,512 @@ describe('PositionsHome → Boros prefill', () => {
 
     await waitFor(() => expect(seen).toHaveLength(1));
     expect(seen[0].maturity).toBe(MATURITY);
+  });
+});
+
+/**
+ * A row names a LEG, so it does not go quiet when its position ends — it lies
+ * in wait for the next position to use that symbol. `applyMembership` ignores
+ * dangling rows per response and its comment says the client deletes them;
+ * the client never did, so closing a hand-grouped position and re-opening the
+ * same market reconstituted the dead one — its id, its grouping, its asserted
+ * entries — with the solver locked out of legs the user never spoke about.
+ */
+describe('PositionsHome — assertions are forgotten when their legs close', () => {
+  const track = () =>
+    localStorage.setItem(STRATEGY_STORAGE_KEY, JSON.stringify({ address: ADDR, since: null }));
+
+  const SAVED_AT = 1_700_000_000;
+
+  /** One card holding Boros market 190 and its Hyperliquid perp. Nothing else
+   * in this book is open — every other leg a row can name has closed. */
+  const liveBook = () =>
+    makeStrategyReturns({
+      strategies: [
+        makeStrategyRollup({
+          legs: [
+            makeStrategyLeg({ marketId: 190 }),
+            makeStrategyLeg({
+              kind: 'perp',
+              side: 'SHORT',
+              symbol: 'HYPERLIQUID_FUTURE_HYPE_USDC',
+              notionalToken: 900,
+              collateral: undefined,
+              entryApr: undefined,
+              markApr: undefined,
+              floatingApr: undefined,
+              maturity: undefined,
+            }),
+          ],
+        }),
+      ],
+    });
+
+  type StoredRow = { positionId?: string; leg: { kind: string; symbol?: string; marketId?: number } };
+  const seed = (rows: StoredRow[], overrides: unknown[] = []) => {
+    localStorage.setItem(
+      'crossex.partition.v1',
+      JSON.stringify({ [BOOK]: { rows, savedAtSec: SAVED_AT } }),
+    );
+    if (overrides.length) {
+      localStorage.setItem(
+        'crossex.entryOverride.v1',
+        JSON.stringify({ [BOOK]: { rows: overrides, savedAtSec: SAVED_AT } }),
+      );
+    }
+  };
+  const storedRows = (): StoredRow[] =>
+    JSON.parse(localStorage.getItem('crossex.partition.v1') ?? '{}')[BOOK]?.rows ?? [];
+  const storedOverrides = (): Array<{ positionId: string }> =>
+    JSON.parse(localStorage.getItem('crossex.entryOverride.v1') ?? '{}')[BOOK]?.rows ?? [];
+
+  /** The strategy feed's own refetch control — the only way to give that feed
+   * a second look inside a test without waiting out its 30s poll. */
+  const lookAgain = () => fireEvent.click(screen.getByTitle('Refetch strategy data'));
+
+  it('keeps a leg that is OPEN but on no card — an unpriced collateral zone', async () => {
+    // ⚠ THE CARDS ARE NOT A CENSUS. `buildBorosLegs` drops a whole collateral
+    // zone whose USD price cannot be resolved, warns, and still answers 200.
+    // Reading "no card holds it" as "the position closed" deleted pins the
+    // user cannot get back — so the prune counts positions, not cards.
+    track();
+    seed([
+      { positionId: 'a3f1c8d2', leg: { kind: 'boros', marketId: 190 } },
+      // Open, but on no card — its collateral zone could not be priced.
+      { positionId: 'a3f1c8d2', leg: { kind: 'boros', marketId: 777 } },
+      // Genuinely closed: on no card AND not a live position. Its disappearance
+      // is what proves the prune actually ran, so 777 surviving means something.
+      { positionId: 'a3f1c8d2', leg: { kind: 'boros', marketId: 999 } },
+    ]);
+    mockPositions();
+    mockStrategy({ ...liveBook(), liveBorosMarketIds: [190, 777] });
+    renderWithClient(<PositionsHome />);
+    await screen.findByText('hedged ✓');
+
+    lookAgain();
+    await waitFor(() => expect(storedRows().map((r) => r.leg.marketId)).toEqual([190, 777]));
+  });
+
+  it('drops the rows of a closed Boros market, and keeps the open one', async () => {
+    track();
+    seed([
+      { positionId: 'dead1234', leg: { kind: 'boros', marketId: 777 } },
+      { positionId: 'a3f1c8d2', leg: { kind: 'boros', marketId: 190 } },
+    ]);
+    mockPositions();
+    mockStrategy(liveBook());
+    renderWithClient(<PositionsHome />);
+    await screen.findByText('hedged ✓');
+
+    // ⚠ ONE settled response is not evidence. Venues do answer 200 with an
+    // empty list during an incident, and a prune has no undo — so the first
+    // look only starts the count.
+    expect(storedRows().map((r) => r.leg.marketId)).toEqual([777, 190]);
+
+    lookAgain();
+    await waitFor(() => expect(storedRows().map((r) => r.leg.marketId)).toEqual([190]));
+  });
+
+  it('will not let one feed delete the other feed\'s rows', async () => {
+    // The perp feed polls at 4s and the strategy feed at 30s, so they
+    // practically never settle on the same tick. A strategy refetch says
+    // nothing about a perp symbol and must leave it alone — judging both
+    // against whichever response happened to arrive would delete assertions
+    // about legs nobody looked at.
+    track();
+    seed([
+      { positionId: 'dead1234', leg: { kind: 'perp', symbol: 'GATE_FUTURE_ETH_USDT' } },
+      { positionId: 'dead1234', leg: { kind: 'boros', marketId: 777 } },
+    ]);
+    mockPositions(); // the account holds no perps at all
+    mockStrategy(liveBook());
+    renderWithClient(<PositionsHome />);
+    await screen.findByText('hedged ✓');
+
+    lookAgain();
+    await waitFor(() => expect(storedRows()).toHaveLength(1));
+    expect(storedRows()[0].leg.symbol).toBe('GATE_FUTURE_ETH_USDT');
+  });
+
+  it('takes the asserted entry down with the claim that made it', async () => {
+    // The worse half of the bug: a stale grouping shows on the card, a stale
+    // entry is just a wrong number — re-armed the moment that position id and
+    // leg coexist again, and conserved onto every other claim on the leg.
+    track();
+    seed(
+      [{ positionId: 'dead1234', leg: { kind: 'boros', marketId: 777 } }],
+      [{ positionId: 'dead1234', leg: { kind: 'boros', marketId: 777 }, value: 0.081 }],
+    );
+    mockPositions();
+    mockStrategy(liveBook());
+    renderWithClient(<PositionsHome />);
+    await screen.findByText('hedged ✓');
+    expect(storedOverrides()).toHaveLength(1);
+
+    lookAgain();
+    await waitFor(() => expect(storedRows()).toEqual([]));
+    expect(storedOverrides()).toEqual([]);
+  });
+
+  it('stops sending a closed leg in ?partition=, so re-opening it starts clean', async () => {
+    // What the user actually feels: the pins the server is asked to honour no
+    // longer name the dead position, so the same market opening again is the
+    // solver's to group, not the ghost's to reclaim.
+    track();
+    seed([{ positionId: 'dead1234', leg: { kind: 'boros', marketId: 777 } }]);
+    mockPositions();
+    const urls: string[] = [];
+    server.use(
+      http.get('/api/strategy/:address', ({ request }) => {
+        urls.push(request.url);
+        return HttpResponse.json(env(liveBook()));
+      }),
+    );
+    renderWithClient(<PositionsHome />);
+    await screen.findByText('hedged ✓');
+    expect(urls.every((u) => u.includes('partition='))).toBe(true);
+
+    lookAgain();
+    await waitFor(() => expect(urls[urls.length - 1]).not.toContain('partition='));
+  });
+});
+
+/**
+ * A pinned claim is an ABSOLUTE number, and a venue position NETS.
+ *
+ * Closing a card's own share of a shared leg shrank the venue leg while the
+ * row went on claiming the same size out of what was left — silently taken
+ * from the cards sharing it. From the card it looked as though nothing had
+ * happened: the size held still and only the denominator beside it moved.
+ */
+describe('PositionsHome — a close shrinks the claim it came from', () => {
+  const SYMBOL = 'GATE_FUTURE_ETH_USDT';
+  const PINNED = 'dead1234';
+  /** The venue holds 0.058; this card states 0.01 of it. */
+  const VENUE_QTY = 0.058;
+  const MINE = 0.01;
+
+  const track = () =>
+    localStorage.setItem(STRATEGY_STORAGE_KEY, JSON.stringify({ address: ADDR, since: null }));
+
+  const seedClaim = (qty: number = MINE) =>
+    localStorage.setItem(
+      'crossex.partition.v1',
+      JSON.stringify({
+        [BOOK]: {
+          rows: [{ positionId: PINNED, leg: { kind: 'perp', symbol: SYMBOL }, qty }],
+          savedAtSec: 1_700_000_000,
+        },
+      }),
+    );
+
+  const pinnedBook = () =>
+    makeStrategyReturns({
+      strategies: [
+        makeStrategyRollup({
+          strategyId: PINNED,
+          attribution: { source: 'user', confidence: 'measured', pinned: true },
+          legs: [
+            makeStrategyLeg({ marketId: 190 }),
+            makeStrategyLeg({
+              kind: 'perp',
+              venue: 'GATE',
+              side: 'LONG',
+              symbol: SYMBOL,
+              notionalToken: MINE,
+              share: MINE / VENUE_QTY, // a SHARE of the venue leg, not all of it
+              collateral: undefined,
+              entryApr: undefined,
+              markApr: undefined,
+              floatingApr: undefined,
+              maturity: undefined,
+            }),
+          ],
+        }),
+      ],
+    });
+
+  const closeHandlers = () => [
+    http.post('/api/preview', async ({ request }) => {
+      const { actions } = (await request.json()) as { actions: ActionInput[] };
+      const a = actions[0];
+      return HttpResponse.json(
+        env({
+          previews: [
+            previewFor(a, {
+              side: 'SELL',
+              qty: a.kind === 'close-position' && a.qty ? a.qty : String(VENUE_QTY),
+              price: '2497.45',
+              closing: { positionQty: String(VENUE_QTY), upnl: '3', mark: 2510 },
+            }),
+          ],
+        }),
+      );
+    }),
+    http.post('/api/deals', async ({ request }) =>
+      HttpResponse.json(env({ id: ((await request.json()) as { id: string }).id }), { status: 202 }),
+    ),
+  ];
+
+  const claims = (): Array<{ qty?: number }> =>
+    JSON.parse(localStorage.getItem('crossex.partition.v1') ?? '{}')[BOOK]?.rows ?? [];
+
+  /** Open the leg's close dialog and hold the confirm through. */
+  const closeLeg = async () => {
+    fireEvent.click(await screen.findByTitle(`Close ${SYMBOL}`));
+    const confirm = await screen.findByRole('button', { name: 'Close now ▸' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.pointerDown(confirm);
+  };
+
+  const renderBook = async () => {
+    track();
+    mockPositions({
+      positions: [makeCrossexPosition({ symbol: SYMBOL, positionQty: String(VENUE_QTY) })],
+    });
+    server.use(
+      http.get('/api/strategy/:address', () => HttpResponse.json(env(pinnedBook()))),
+      ...closeHandlers(),
+    );
+    renderWithClient(<PositionsHome />);
+    await screen.findByTitle(`Close ${SYMBOL}`);
+  };
+
+  it('drops the claim when the card closes the whole of its own share', async () => {
+    // The dialog opens pre-filled with this card's 0.01 — the reported case.
+    // Afterwards the card holds none of that leg, and cannot drift back onto
+    // it: the solver proposes nothing into a card that has rows of its own.
+    seedClaim();
+    await renderBook();
+    await closeLeg();
+    await waitFor(() => expect(claims()).toEqual([]));
+  });
+
+  it('reduces it by the amount closed when only part of the share goes', async () => {
+    seedClaim();
+    await renderBook();
+    fireEvent.click(await screen.findByTitle(`Close ${SYMBOL}`));
+    fireEvent.change(await screen.findByLabelText('Close qty'), { target: { value: '0.004' } });
+    const confirm = await screen.findByRole('button', { name: 'Close now ▸' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.pointerDown(confirm);
+
+    // The row survives — this card still holds the rest — carrying what is
+    // left rather than the number it walked in with.
+    await waitFor(() => expect(claims()[0]?.qty).toBeCloseTo(MINE - 0.004, 9));
+    expect(claims()).toHaveLength(1);
+  });
+
+  it('leaves a blanket claim alone — "all of it" already follows the venue', async () => {
+    // There is no number to decrement. Writing one would turn a claim that
+    // re-derives itself into a constant that goes stale on the next close.
+    localStorage.setItem(
+      'crossex.partition.v1',
+      JSON.stringify({
+        [BOOK]: {
+          rows: [{ positionId: PINNED, leg: { kind: 'perp', symbol: SYMBOL } }],
+          savedAtSec: 1_700_000_000,
+        },
+      }),
+    );
+    await renderBook();
+    await closeLeg();
+    await waitFor(() => expect(claims()).toHaveLength(1));
+    expect(claims()[0].qty).toBeUndefined();
+  });
+});
+
+/**
+ * "Automatic" is scoped to the card it was pressed on.
+ *
+ * A shared venue leg is on more than one card. Choosing Automatic on the
+ * unclaimed remainder used to delete EVERY row naming that leg — including
+ * the pin a hand-grouped card held on it, a card the user never touched — and
+ * the solver, now seeing the whole venue leg free, swept all of it into one
+ * position. The pinned card silently lost its leg.
+ */
+describe('PositionsHome — Automatic forgets only this card', () => {
+  const PINNED = 'a1b2c3d4';
+  const MARKET = 190;
+  const MINE = 0.01;
+  const REST = 0.04;
+
+  const track = () =>
+    localStorage.setItem(STRATEGY_STORAGE_KEY, JSON.stringify({ address: ADDR, since: null }));
+
+  const borosLeg = (notionalToken: number, share: number) =>
+    makeStrategyLeg({
+      marketId: MARKET,
+      venue: 'HYPERLIQUID',
+      side: 'SHORT' as const,
+      notionalToken,
+      share,
+    });
+
+  /** One venue leg of 0.05, split: 0.01 pinned to a hand-grouped card, 0.04
+   * left over as its own unhedged card. */
+  const sharedBook = () =>
+    makeStrategyReturns({
+      strategies: [
+        makeStrategyRollup({
+          strategyId: PINNED,
+          attribution: { source: 'user', confidence: 'measured', pinned: true },
+          legs: [
+            makeStrategyLeg({
+              kind: 'perp',
+              venue: 'BINANCE',
+              side: 'LONG',
+              symbol: 'BINANCE_FUTURE_HYPE_USDT',
+              notionalToken: 0.05,
+              collateral: undefined,
+              entryApr: undefined,
+              markApr: undefined,
+              floatingApr: undefined,
+              maturity: undefined,
+            }),
+            borosLeg(MINE, MINE / (MINE + REST)),
+          ],
+        }),
+        makeStrategyRollup({
+          strategyId: 'HYPE#unhedged:190',
+          attribution: { source: 'unhedged', confidence: 'measured', pinned: false, unclaimed: true },
+          hedge: 'unhedged',
+          legs: [borosLeg(REST, REST / (MINE + REST))],
+        }),
+      ],
+    });
+
+  const seed = (rows: unknown[]) =>
+    localStorage.setItem(
+      'crossex.partition.v1',
+      JSON.stringify({ [BOOK]: { rows, savedAtSec: 1_700_000_000 } }),
+    );
+  const rowsNow = (): Array<{ positionId?: string; qty?: number }> =>
+    JSON.parse(localStorage.getItem('crossex.partition.v1') ?? '{}')[BOOK]?.rows ?? [];
+
+  /** Automatic on the LAST assign trigger — the unhedged card renders after
+   * the pinned one, and holds only the Boros leg. */
+  const automaticOnRemainder = async () => {
+    for (const t of screen.getAllByRole('button', { name: 'toggle details' })) fireEvent.click(t);
+    const triggers = screen.getAllByTitle(/click to assign|click to change/);
+    fireEvent.click(triggers[triggers.length - 1]);
+    fireEvent.click(screen.getByRole('button', { name: /Automatic/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+  };
+
+  it('hands the remainder back without stripping the pin on the same leg', async () => {
+    track();
+    seed([
+      { positionId: PINNED, leg: { kind: 'boros', marketId: MARKET }, qty: MINE },
+      { leg: { kind: 'boros', marketId: MARKET }, qty: REST },
+    ]);
+    mockPositions();
+    mockStrategy(sharedBook());
+    renderWithClient(<PositionsHome />);
+    await screen.findByText('grouped by you');
+
+    await automaticOnRemainder();
+
+    // The orphan row goes — that is what Automatic was asked for…
+    await waitFor(() => expect(rowsNow().filter((r) => r.positionId === undefined)).toEqual([]));
+    // …and the hand-grouped card keeps its 0.01. It was never in the question.
+    expect(rowsNow()).toEqual([
+      { positionId: PINNED, leg: { kind: 'boros', marketId: MARKET }, qty: MINE },
+    ]);
+  });
+
+  /**
+   * ⚠ `unclaimed`, NOT `source === 'unhedged'`.
+   *
+   * `source` answers how a grouping was arrived at, and reusing it here
+   * collided both ways: a solver tranche on a coin with no Boros ALSO reports
+   * 'unhedged' (the chip means "no rate is locked against this"), while the
+   * Boros remainder card reports 'boros-only'/'merged'.
+   */
+  it('leaves a neighbour\'s detachment alone when pressed on a solver tranche', async () => {
+    // `ETH#BINANCE-HYPERLIQUID#0` is what the solver emits for a coin with no
+    // Boros cohort — reported 'unhedged' because nothing locks a rate against
+    // it, but it asserted nothing and owns no rows. Automatic there is a
+    // statement about a card that never claimed the leg.
+    track();
+    seed([{ leg: { kind: 'boros', marketId: MARKET }, qty: REST }]);
+    mockPositions();
+    mockStrategy(
+      makeStrategyReturns({
+        strategies: [
+          makeStrategyRollup({
+            strategyId: 'HYPE#BINANCE-HYPERLIQUID#0',
+            attribution: { source: 'unhedged', confidence: 'measured', pinned: false },
+            hedge: 'unhedged',
+            legs: [borosLeg(MINE, MINE / (MINE + REST))],
+          }),
+        ],
+        liveBorosMarketIds: [MARKET],
+      }),
+    );
+    renderWithClient(<PositionsHome />);
+    await screen.findAllByTitle(/click to assign|click to change/);
+    await automaticOnRemainder();
+
+    // The orphan row is somebody else's detachment and must survive.
+    await waitFor(() => expect(rowsNow()).toHaveLength(1));
+    expect(rowsNow()[0].positionId).toBeUndefined();
+  });
+
+  it('un-detaches from a Boros remainder card, which reports neither pinned nor unhedged', async () => {
+    // The unowned Boros card carries source 'boros-only' / 'merged'. Keying
+    // off 'unhedged' made Automatic a silent no-op here — the one card family
+    // where it genuinely means "forget my detachment".
+    track();
+    seed([{ leg: { kind: 'boros', marketId: MARKET }, qty: REST }]);
+    mockPositions();
+    mockStrategy(
+      makeStrategyReturns({
+        strategies: [
+          makeStrategyRollup({
+            strategyId: 'HYPE@boros-remainder',
+            attribution: {
+              source: 'merged',
+              confidence: 'measured',
+              pinned: false,
+              unclaimed: true,
+            },
+            hedge: 'unhedged',
+            legs: [borosLeg(REST, 1)],
+          }),
+        ],
+        liveBorosMarketIds: [MARKET],
+      }),
+    );
+    renderWithClient(<PositionsHome />);
+    await screen.findAllByTitle(/click to assign|click to change/);
+    await automaticOnRemainder();
+
+    await waitFor(() => expect(rowsNow()).toEqual([]));
+  });
+
+  it('still sends the pin to the server, so the card does not lose the leg', async () => {
+    track();
+    seed([
+      { positionId: PINNED, leg: { kind: 'boros', marketId: MARKET }, qty: MINE },
+      { leg: { kind: 'boros', marketId: MARKET }, qty: REST },
+    ]);
+    mockPositions();
+    const urls: string[] = [];
+    server.use(
+      http.get('/api/strategy/:address', ({ request }) => {
+        urls.push(request.url);
+        return HttpResponse.json(env(sharedBook()));
+      }),
+    );
+    renderWithClient(<PositionsHome />);
+    await screen.findByText('grouped by you');
+
+    await automaticOnRemainder();
+
+    // Every request after the change still carries a partition — an empty one
+    // would mean the whole leg went back to the solver, which is the bug.
+    await waitFor(() => expect(urls.length).toBeGreaterThan(1));
+    expect(urls[urls.length - 1]).toContain('partition=');
   });
 });

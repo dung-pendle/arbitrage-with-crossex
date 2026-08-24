@@ -136,6 +136,49 @@ const cardFor = (out: ReturnType<typeof buildStrategies>, perpVenue: string) =>
 const borosQty = (s: ReturnType<typeof buildStrategies>['strategies'][number], venue: string) =>
   s.legs.find((l) => l.kind === 'boros' && l.venue === venue)?.notionalToken ?? 0;
 
+/**
+ * ⚠ THE CARDS ARE NOT A CENSUS OF THE VENUE.
+ *
+ * The client prunes a membership row once the server stops reporting its leg,
+ * so "which legs exist" must be answered by something no downstream filtering
+ * can shorten. `buildBorosLegs` drops a whole collateral zone whose USD price
+ * cannot be resolved — a warning, and a 200 — so a position can be open and on
+ * no card. Read off the cards, that was indistinguishable from closed, and the
+ * user's pins for those legs were deleted with no undo.
+ */
+describe('liveBorosMarketIds — counted from the zones, not the cards', () => {
+  it('still lists a market whose collateral zone could not be priced', () => {
+    const out = buildStrategies(book({ pricesUsd: new Map([[2, null]]) }));
+    // Nothing could be built…
+    expect(out.strategies.flatMap((s) => s.legs).filter((l) => l.kind === 'boros')).toEqual([]);
+    expect(out.warnings.join(' ')).toMatch(/Can't price the .* collateral zone/);
+    // …and the positions are open all the same.
+    expect([...out.liveBorosMarketIds].sort((a, b) => a - b)).toEqual([128, 129]);
+  });
+
+  it('lists exactly the markets the account holds a position on', () => {
+    const out = buildStrategies(book());
+    expect([...out.liveBorosMarketIds].sort((a, b) => a - b)).toEqual([128, 129]);
+  });
+
+  it('leaves out a market whose position is flat', () => {
+    // A closed leg must NOT be reported live, or the prune could never run.
+    const flat = zones().map((z) => ({
+      ...z,
+      cross: z.cross
+        ? {
+            ...z.cross,
+            marketPositions: z.cross.marketPositions.map((p) =>
+              p.marketId === 128 ? { ...p, notionalSize: '0' } : p,
+            ),
+          }
+        : z.cross,
+    }));
+    const out = buildStrategies(book({ zones: flat }));
+    expect(out.liveBorosMarketIds).toEqual([129]);
+  });
+});
+
 describe('shared Boros leg — anchored on the Boros fills', () => {
   it('gives the whole leg to the strategy whose fills opened it', () => {
     // Boros anchors: the fill that built this leg landed with the Binance
@@ -285,6 +328,48 @@ describe('one perp, two maturities', () => {
     // No phantom perp-less card, and no "attached to the largest cohort" note.
     expect(out.strategies.some((s) => s.attribution.source === 'boros-only')).toBe(false);
     expect(out.strategies.flatMap((s) => s.warnings).join(' ')).not.toMatch(/largest cohort/);
+  });
+
+  /**
+   * ⚠ A POSITION RUNS TO ONE DATE, and only a PINNED card can break that.
+   *
+   * A solved card is single-maturity structurally (cohorts are keyed
+   * `(base, maturity)`), so this is the one path that needs saying out loud.
+   * The dialog refuses the assignment now, but a share link or a pin written
+   * before it did can still carry the clash in — and it does not degrade the
+   * card, it misprices it, silently, while every number keeps its confident
+   * formatting.
+   */
+  it('warns when a pinned position holds Boros legs of two maturities', () => {
+    const P = 'a1b2c3d4';
+    const out = buildStrategies({
+      ...twoMaturities(),
+      membership: [
+        { positionId: P, leg: { kind: 'boros', marketId: 129 } }, // Dec long
+        { positionId: P, leg: { kind: 'boros', marketId: 128 } }, // Dec short
+        { positionId: P, leg: { kind: 'boros', marketId: 102 } }, // SEP short — the intruder
+      ],
+    });
+    const card = out.strategies.find((s) => s.strategyId === P)!;
+    expect(card.legs.filter((l) => l.kind === 'boros')).toHaveLength(3);
+    expect(card.warnings.join(' ')).toMatch(/mature on 2 different dates/);
+    // …and the warning is worth having because THIS is what the card's own
+    // countdown and every projection on it are computed against.
+    expect(card.maturity).toBe(MAT_SEP);
+  });
+
+  it('says nothing when a pinned position keeps to one maturity', () => {
+    const P = 'a1b2c3d4';
+    const out = buildStrategies({
+      ...twoMaturities(),
+      membership: [
+        { positionId: P, leg: { kind: 'boros', marketId: 129 } },
+        { positionId: P, leg: { kind: 'boros', marketId: 128 } },
+      ],
+    });
+    const card = out.strategies.find((s) => s.strategyId === P)!;
+    expect(card.legs.filter((l) => l.kind === 'boros')).toHaveLength(2);
+    expect(card.warnings.join(' ')).not.toMatch(/different dates/);
   });
 
   it('splits one Hyperliquid perp across the two maturities it hedges', () => {

@@ -317,6 +317,20 @@ export interface StrategyAttribution {
   source: TrancheSource | 'merged' | 'boros-only' | 'unhedged';
   confidence: TrancheConfidence;
   pinned: boolean;
+  /**
+   * True when this card exists ONLY to report size no position claims —
+   * detached by the user, or left over by the solver.
+   *
+   * ⚠ A SEPARATE QUESTION FROM `source`, which answers how a grouping was
+   * arrived at. The two were conflated, and collided both ways: a solver
+   * tranche on a coin with no Boros reports `source: 'unhedged'` (the chip
+   * means "no rate is locked against this"), while the Boros remainder card
+   * reports `'boros-only'` or `'merged'`. So "is this the card holding the
+   * detached size" could not be read off `source` at all — the client's
+   * Automatic deleted a neighbour's detachment from the first, and did
+   * nothing on the second.
+   */
+  unclaimed?: boolean;
 }
 
 export interface StrategyRollup {
@@ -375,6 +389,18 @@ export interface StrategyReturns {
   /** null when Gate isn't configured — Boros-only view. */
   perpSource: 'connected-gate-account' | null;
   strategies: StrategyRollup[];
+  /**
+   * Every Boros market the venue reports a live position on — counted from the
+   * account's own zones, so no downstream filtering can shorten it.
+   *
+   * ⚠ NOT the same as the markets appearing on `strategies`. A collateral zone
+   * that cannot be priced in USD is excluded from every card (with a warning)
+   * while its positions stay open, so a market can be live here and absent
+   * there. The client prunes membership rows against THIS, never against the
+   * cards: reading "no card holds it" as "the position closed" deleted pins
+   * the user cannot get back.
+   */
+  liveBorosMarketIds: number[];
   totals: {
     capitalUsd: number;
     realizedPnlUsd: number;
@@ -1488,7 +1514,8 @@ export function buildStrategies(input: BuildStrategiesInput): StrategyReturns {
     const card = (strategyId: string, base: string, perpBuilds: PerpLegBuild[]) =>
       assembleStrategy({
         strategyId,
-        attribution: { source: 'unhedged', confidence: 'measured', pinned: false },
+        // Live perp size no position claimed: this card IS the remainder.
+        attribution: { source: 'unhedged', confidence: 'measured', pinned: false, unclaimed: true },
         base,
         // No Boros legs, so no maturity — see the sentinel on StrategyRollup.
         maturity: 0,
@@ -1560,10 +1587,37 @@ export function buildStrategies(input: BuildStrategiesInput): StrategyReturns {
     }
   }
 
+  /**
+   * Every Boros market the venue reports a live position on.
+   *
+   * ⚠ READ FROM THE ZONES, not from the cards, and that is the whole point.
+   * The client prunes a membership row once the server stops reporting its
+   * leg, so "which legs exist" has to be answered by something no downstream
+   * filtering can shorten — and `buildBorosLegs` drops an entire collateral
+   * zone when its USD price cannot be resolved (a warning, and a 200). Legs in
+   * that zone are open, invisible on every card, and were being read as
+   * closed: two settled polls later the user's pins and asserted entries for
+   * them were deleted, with no undo.
+   *
+   * So this counts positions, nothing else. A leg listed here may still be
+   * missing from every card; that means the card could not be built, never
+   * that the position is gone.
+   */
+  const liveBorosMarketIds = [
+    ...new Set(
+      input.zones.flatMap((z) =>
+        [...(z.cross ? [z.cross] : []), ...z.isolated].flatMap((g) =>
+          g.marketPositions.filter((p) => norm18(p.notionalSize) !== 0).map((p) => p.marketId),
+        ),
+      ),
+    ),
+  ];
+
   return {
     address: input.address,
     perpSource: perpAvailable ? 'connected-gate-account' : null,
     strategies,
+    liveBorosMarketIds,
     totals: {
       capitalUsd,
       realizedPnlUsd,
@@ -1704,10 +1758,17 @@ function applyMembership(
    * the overwhelmingly common way a leg stops existing is that the user CLOSED
    * it — the normal end of a position's life — and warning about that greeted
    * anyone who flattened their book with a wall of amber naming every leg they
-   * had just deliberately closed. The rows are pruned by the client
-   * (partitionStore) once the server stops returning their legs; a genuinely
-   * stale assertion is indistinguishable from a closed one here, and the
-   * closed reading is right almost every time.
+   * had just deliberately closed. A genuinely stale assertion is
+   * indistinguishable from a closed one here, and the closed reading is right
+   * almost every time.
+   *
+   * ⚠ THIS FILTER IS NOT A DELETE, and for a long time nothing else was one:
+   * the comment here claimed the client pruned the rows and it did not. A row
+   * names a LEG, so ignoring it per response left it in the browser naming a
+   * symbol the user was likely to trade again — and re-opening that market
+   * handed the leg straight back to the closed position, id, grouping,
+   * asserted entries and all. The delete now lives where it can see the whole
+   * book at once: `partitionStore.ts:pruneRows`, driven by PositionsHome.
    */
   const live = (l: LegRef): boolean =>
     l.kind === 'perp' ? perpBySymbol.has(l.symbol) : borosByMarket.has(l.marketId);
@@ -1956,6 +2017,31 @@ function applyMembership(
     card.warnings.push(
       `This ${card.base} position holds the legs you assigned to it — the rest of the book is matched around them, and it holds until you change it.`,
     );
+    /**
+     * ⚠ A POSITION RUNS TO ONE DATE, and this is the only path that can break
+     * that.
+     *
+     * A solved card is single-maturity structurally: cohorts are keyed
+     * `(base, maturity)` and `mergedStrategies` emits one card per cohort, so
+     * the shape cannot arise there and needs no check. A card built from ROWS
+     * has no such floor — the user can assign a leg from any market on the
+     * coin, and a share link or a pin written before the dialog started
+     * refusing it can carry the clash in.
+     *
+     * It is worth its own warning rather than being left to the hedge ratios,
+     * because it does not degrade the card, it MISPRICES it. `maturity` above
+     * is `Math.min` across the legs, and the countdown, `secondsToMaturity`,
+     * `spreadReturnUsd` and the PnL projection all run off it — so the later
+     * leg's fixed rate is accrued only to the earlier leg's date, and every
+     * number keeps its confident formatting while it does. A size mismatch at
+     * least announces itself.
+     */
+    const legMaturities = [...new Set(maturities.filter((m) => m > 0))].sort((a, b) => a - b);
+    if (legMaturities.length > 1) {
+      card.warnings.push(
+        `This ${card.base} position holds Boros legs that mature on ${legMaturities.length} different dates (${legMaturities.map((m) => new Date(m * 1000).toISOString().slice(0, 10)).join(', ')}). Its countdown and every projection on it run to the earliest of them, so the later leg's rate is credited only up to that date — split them into one position per maturity to price either correctly.`,
+      );
+    }
     cards.push(card);
   }
 
@@ -2765,6 +2851,9 @@ function splitStrategies(
           source: attached ? 'boros-only' : 'merged',
           confidence: g.unconfirmed ? 'unconfirmed' : 'measured',
           pinned: false,
+          // Boros notional NO POSITION CLAIMED — what the solver could not
+          // attach and what the user detached, which arrive here as one thing.
+          unclaimed: true,
         },
         base,
         maturity,

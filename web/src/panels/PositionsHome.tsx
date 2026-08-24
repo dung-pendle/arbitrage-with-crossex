@@ -7,7 +7,7 @@
  * Owns the persisted {address, since, exit flags} state and both queries;
  * the boxes themselves are prop-driven.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { qk, usePositions, useStrategy } from '../api/queries';
 import type { CrossexPosition, StrategyRollup } from '../api/types';
@@ -21,6 +21,7 @@ import { useBookId } from './bookId';
 import {
   loadOverrides,
   overrideFor,
+  pruneOverrides,
   saveOverrides,
   withOverride,
   type EntryOverride,
@@ -35,16 +36,47 @@ import {
   legRefKey,
   loadRows,
   newPositionId,
+  pruneRows,
   saveRows,
   withRow,
   type MembershipRow,
-  type RowChange,
 } from './partitionStore';
-import { legRefOf, positionVenues, type LegAssertion } from './PartitionEditor';
+import {
+  legRefOf,
+  positionVenues,
+  type LegAssertion,
+  type LegDestination,
+} from './PartitionEditor';
 import { crossexVenueFor } from '../lib/boros';
 
 /** Stable empty list, so a callback's deps don't change every render. */
 const EMPTY_STRATEGIES: StrategyRollup[] = [];
+
+/** One feed's last settled answer: which legs it reported, and which fetch
+ * said so. The stamp is what makes a second look a second FETCH. */
+interface Seen {
+  at: number;
+  legs: ReadonlySet<string>;
+}
+
+/**
+ * Fold a feed's newest answer into what it said last time.
+ *
+ * `legs` is the union of the two — every leg either look reported, which is
+ * what a prune is allowed to believe is gone — or null while this feed has
+ * only been looked at once, which is not enough to delete anything.
+ */
+function confirmedLegs(
+  prev: Seen | null,
+  at: number,
+  legs: ReadonlySet<string>,
+): { seen: Seen; legs: ReadonlySet<string> | null } {
+  if (prev === null) return { seen: { at, legs }, legs: null };
+  // The same fetch re-read: keep the earlier pair, and keep answering with it,
+  // so a re-render neither advances the count nor forgets a confirmed absence.
+  if (prev.at === at) return { seen: prev, legs: null };
+  return { seen: { at, legs }, legs: new Set([...prev.legs, ...legs]) };
+}
 
 /** A position, named the way its own card header names it. */
 const labelFor = (s: StrategyRollup): string => {
@@ -91,14 +123,32 @@ function distinctLabels(items: readonly StrategyRollup[]): string[] {
   return labels;
 }
 
-/** The other cards a leg on `s` can be sent to: same coin, any shape. */
+/**
+ * The other cards a leg on `s` can be sent to: same coin, any shape.
+ *
+ * Shape is still not a filter — a card may hold one leg or six, a hedge that
+ * is half-open, a spread with no perps yet. What each destination carries is
+ * the Boros maturity it already holds, so the dialog can refuse the one shape
+ * a solved card can never have: two maturities at once. See `LegDestination`.
+ */
 function destinationsFor(
   s: StrategyRollup,
   all: readonly StrategyRollup[],
-): Array<{ id: string; label: string }> {
+): LegDestination[] {
   const others = all.filter((o) => o.strategyId !== s.strategyId && o.base === s.base);
   const labels = distinctLabels(others);
-  return others.map((o, i) => ({ id: o.strategyId, label: labels[i] }));
+  return others.map((o, i) => {
+    // The EARLIEST, because that is the one every number on that card is
+    // computed against (`assembleStrategy` takes `Math.min`).
+    const maturities = o.legs
+      .filter((l) => l.kind === 'boros' && typeof l.maturity === 'number' && l.maturity > 0)
+      .map((l) => l.maturity as number);
+    return {
+      id: o.strategyId,
+      label: labels[i],
+      borosMaturity: maturities.length ? Math.min(...maturities) : null,
+    };
+  });
 }
 
 export function PositionsHome() {
@@ -121,8 +171,15 @@ export function PositionsHome() {
   // Scoped to the book for the same reason the rows are.
   const [entryRows, setEntryRows] = useState<EntryOverride[]>(() => loadOverrides(bookId));
   const [rowsFor, setRowsFor] = useState<string>(bookId);
+  // WHEN this book came on screen. A credentials swap invalidates every query
+  // but does not blank what they already hold, so for a beat `bookId` names
+  // the new account while both feeds still answer for the old one — and
+  // pruning against that would delete the new book's assertions using the old
+  // book's legs. A response is only believed once it is stamped after this.
+  const [bookSince, setBookSince] = useState<number>(() => Date.now());
   if (rowsFor !== bookId) {
     setRowsFor(bookId);
+    setBookSince(Date.now());
     setRows(loadRows(bookId));
     setEntryRows(loadOverrides(bookId));
   }
@@ -155,6 +212,28 @@ export function PositionsHome() {
   const strategies = strategyQuery.data?.strategies ?? EMPTY_STRATEGIES;
 
   /**
+   * Ids minted for solver-proposed cards since the last server response.
+   *
+   * ⚠ ONE CONFIRM IS ONE CHANGE, however many facts it carries. `commit()`
+   * emits an entry correction and a membership change as two `applyAssertion`
+   * calls, and `freeze` decides whether a card already has an id by reading
+   * `attribution.pinned` off the rollup PROP — which is still false during the
+   * second call, because no response has landed in between. So the second call
+   * minted a second id and wrote a second full row set, every leg ended up
+   * claimed by two ids at once, and the server split the card down the middle
+   * into two phantom positions with the asserted entry on one of them.
+   *
+   * Memoizing by the card's current strategyId makes `freeze` idempotent for
+   * as long as the prop it cannot trust stays stale. Keyed on the `strategies`
+   * array identity so a fresh response starts over — by then the card carries
+   * its minted id as its own strategyId and takes the pinned branch anyway.
+   */
+  const mintedFor = useRef<{ solved: readonly StrategyRollup[]; ids: Map<string, string> }>({
+    solved: EMPTY_STRATEGIES,
+    ids: new Map(),
+  });
+
+  /**
    * Record where the user says one leg belongs.
    *
    * ⚠ Both ENDS of a move have to be frozen. A solver-proposed card has no
@@ -170,7 +249,15 @@ export function PositionsHome() {
         let next = prev;
         const freeze = (s: StrategyRollup): string => {
           if (s.attribution.pinned) return s.strategyId;
+          if (mintedFor.current.solved !== strategies) {
+            mintedFor.current = { solved: strategies, ids: new Map() };
+          }
+          // Same card, same tick, same id — see the note on `mintedFor`. Also
+          // what makes this updater safe to run twice under StrictMode.
+          const already = mintedFor.current.ids.get(s.strategyId);
+          if (already !== undefined) return already;
           const id = newPositionId();
+          mintedFor.current.ids.set(s.strategyId, id);
           for (const l of s.legs) {
             const ref = legRefOf(l);
             if (!ref) continue;
@@ -259,6 +346,42 @@ export function PositionsHome() {
             // Whole leg → no size, so it stays orphaned if the venue grows it.
             ...(share < 0.999 ? { qty: mine?.notionalToken } : {}),
           });
+        } else if (a.mode === 'closed') {
+          /**
+           * ⚠ ONLY A STATED SIZE CAN GO STALE, and only on the card that
+           * stated it.
+           *
+           * A blanket claim ("all of it") is already relative — it re-derives
+           * from whatever the venue still holds — and a solver-proposed card
+           * is re-solved from the venue on every response. Both follow a close
+           * on their own. Writing a row for either would PIN a grouping the
+           * user never asserted, on their way out of the position, which is
+           * the last moment to start freezing things.
+           */
+          const key = legRefKey(a.leg);
+          const held = next.find(
+            (r) =>
+              r.positionId === from.strategyId && legRefKey(r.leg) === key && r.qty !== undefined,
+          )?.qty;
+          if (held !== undefined) {
+            const left = held - a.qty;
+            // Nothing left worth stating: drop the row, and this card simply
+            // does not hold that leg any more. It cannot drift back — the
+            // solver proposes nothing into a card that has rows of its own.
+            next =
+              left > Math.max(1e-9, held * 1e-6)
+                ? withRow(next, {
+                    mode: 'assign',
+                    positionId: from.strategyId,
+                    leg: a.leg,
+                    qty: left,
+                  })
+                : withRow(next, {
+                    mode: 'release',
+                    positionId: from.strategyId,
+                    leg: a.leg,
+                  });
+          }
         } else if (a.mode === 'entry') {
           // An entry says what THIS card paid, so it needs a stable id to hang
           // off — the same freeze the membership modes use. Nothing about the
@@ -271,9 +394,37 @@ export function PositionsHome() {
             saveOverrides(bookId, nextEntries, Math.floor(Date.now() / 1000));
             return nextEntries;
           });
-        } else {
-          const change: RowChange = { mode: a.mode, leg: a.leg };
-          next = withRow(next, change);
+        } else if (a.mode === 'auto') {
+          /**
+           * ⚠ FORGET ONLY WHAT THIS CARD SAID, never the whole leg.
+           *
+           * This dropped every row naming the leg. On a shared one that meant
+           * pressing Automatic on the unclaimed 0.04 remainder also deleted
+           * the 0.01 a pinned card held — a card the user never touched — and
+           * the solver, now seeing all 0.05 free, swept it into one position.
+           * The pinned card silently lost its leg. `orphan` above carries the
+           * same warning; this mode simply never got it.
+           *
+           * Which rows are "this card's" follows from how the card exists at
+           * all: a PINNED card owns rows under its own id, and an UNCLAIMED
+           * card IS what an orphan row produces, so its rows carry no id. A
+           * solver-proposed card asserted nothing, so it has nothing to
+           * forget — Automatic is already true of it, and touching the orphan
+           * rows from there would strip a neighbour's detachment instead.
+           *
+           * ⚠ `unclaimed`, NOT `source === 'unhedged'`. `source` answers how a
+           * grouping was arrived at, which is a different question, and using
+           * it here collided both ways: a solver tranche on a coin with no
+           * Boros also reports `'unhedged'` (so Automatic there deleted a
+           * neighbour's detachment — this exact bug, from the other side),
+           * while the Boros remainder card reports `'boros-only'`/`'merged'`
+           * (so Automatic there silently did nothing at all).
+           */
+          if (from.attribution.pinned) {
+            next = withRow(next, { mode: 'auto', leg: a.leg, positionId: from.strategyId });
+          } else if (from.attribution.unclaimed) {
+            next = withRow(next, { mode: 'auto', leg: a.leg });
+          }
         }
         saveRows(bookId, next, Math.floor(Date.now() / 1000));
         return next;
@@ -296,6 +447,127 @@ export function PositionsHome() {
     for (const p of positionsData?.positions ?? []) map.set(p.symbol, p);
     return map;
   }, [positionsData?.positions]);
+
+  /**
+   * Perp legs the book actually holds, as `legRefKey` strings.
+   *
+   * The POSITIONS feed is the authority, not the cards: a perp the user
+   * detached never appears on one. `applyMembership` drops a detached perp
+   * straight out of the pool and the derived pass reports it by subtraction —
+   * so pruning perps against the cards would delete exactly the assertion that
+   * made the leg invisible, handing the leg back to the solver on the next
+   * poll. The cards are unioned in anyway: a leg on a card the 4s feed has not
+   * caught up with yet is still open, and the union can only keep rows.
+   */
+  const livePerpLegs = useMemo(() => {
+    const live = new Set<string>();
+    for (const p of positionsData?.positions ?? []) {
+      live.add(legRefKey({ kind: 'perp', symbol: p.symbol }));
+    }
+    for (const s of strategies) {
+      for (const l of s.legs) {
+        if (l.kind !== 'perp') continue;
+        const ref = legRefOf(l);
+        if (ref) live.add(legRefKey(ref));
+      }
+    }
+    return live;
+  }, [positionsData?.positions, strategies]);
+
+  /**
+   * Boros legs the book actually holds — from the payload's own count of live
+   * positions, NEVER from the cards.
+   *
+   * ⚠ THE CARDS ARE NOT A CENSUS OF THE VENUE. This read them, on the
+   * reasoning that every live Boros leg reaches a card: what no position
+   * claimed and what the user detached both become their own unowned card.
+   * That holds for the grouping passes and fails before them —
+   * `buildBorosLegs` drops an entire collateral zone whose USD price cannot be
+   * resolved, warns, and still answers 200. Those positions are open and on no
+   * card, so the prune read them as closed and deleted the user's pins and
+   * asserted entries for them: the exact irreversible loss the two-look guard
+   * exists to prevent, reached by a route the guard cannot see.
+   *
+   * `liveBorosMarketIds` counts positions in the account's own zones and
+   * nothing else, so no downstream filtering can shorten it.
+   */
+  const liveBorosLegs = useMemo(() => {
+    const live = new Set<string>();
+    for (const marketId of strategyData?.liveBorosMarketIds ?? []) {
+      live.add(legRefKey({ kind: 'boros', marketId }));
+    }
+    // A card holding a leg the census somehow missed is still evidence that
+    // leg is open. The union can only ever KEEP rows.
+    for (const s of strategies) {
+      for (const l of s.legs) {
+        if (l.kind !== 'boros') continue;
+        const ref = legRefOf(l);
+        if (ref) live.add(legRefKey(ref));
+      }
+    }
+    return live;
+  }, [strategyData?.liveBorosMarketIds, strategies]);
+
+  /**
+   * What each feed reported the LAST time it settled.
+   *
+   * A leg has to be missing from two consecutive responses OF ITS OWN FEED
+   * before its rows are deleted. Venues do answer 200 with an empty list
+   * during an incident, and a single such poll would otherwise erase a whole
+   * book of assertions with no undo — the user would rebuild the grouping from
+   * memory, which is the failure `partitionStore` exists to prevent. Waiting
+   * one more poll costs a cleanup 4s (perps) or 30s (Boros) of lateness.
+   *
+   * Per feed, and keyed by `dataUpdatedAt`, so neither a re-render nor the
+   * perp feed's faster cadence can pass off one look as two.
+   */
+  const lastSeen = useRef<{ perp: Seen | null; boros: Seen | null }>({ perp: null, boros: null });
+
+  const perpAt = positionsQuery.dataUpdatedAt;
+  const borosAt = strategyQuery.dataUpdatedAt;
+  // Both halves of the book have to be settled, and settled for THIS book —
+  // see `bookSince`. Either one missing means we cannot tell a closed leg from
+  // an unloaded one, and a prune is forever.
+  const settledForBook =
+    positionsQuery.isSuccess && strategyQuery.isSuccess && perpAt > bookSince && borosAt > bookSince;
+
+  useEffect(() => {
+    if (!settledForBook) {
+      // A book change or a failed feed voids the first look; the next two
+      // start the count again.
+      lastSeen.current = { perp: null, boros: null };
+      return;
+    }
+    const perp = confirmedLegs(lastSeen.current.perp, perpAt, livePerpLegs);
+    const boros = confirmedLegs(lastSeen.current.boros, borosAt, liveBorosLegs);
+    lastSeen.current = { perp: perp.seen, boros: boros.seen };
+    if (perp.legs === null && boros.legs === null) return; // no feed looked again
+
+    /**
+     * ⚠ EACH KIND IS JUDGED BY ITS OWN FEED, and only while that feed has just
+     * confirmed an absence. The feeds run 4s and 30s apart, so they practically
+     * never advance on the same tick — requiring both would mean this never
+     * ran at all. `null` is "that feed has nothing new to say", which is not
+     * evidence of anything, so its rows are kept and it gets its own turn.
+     */
+    const nextRows = pruneRows(rows, (leg) =>
+      leg.kind === 'perp'
+        ? perp.legs === null || perp.legs.has(legRefKey(leg))
+        : boros.legs === null || boros.legs.has(legRefKey(leg)),
+    );
+    // Membership first: an override outlives its leg only through its claim.
+    const nextEntries = pruneOverrides(entryRows, nextRows);
+    if (nextRows === rows && nextEntries === entryRows) return;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (nextRows !== rows) {
+      saveRows(bookId, nextRows, nowSec);
+      setRows(nextRows);
+    }
+    if (nextEntries !== entryRows) {
+      saveOverrides(bookId, nextEntries, nowSec);
+      setEntryRows(nextEntries);
+    }
+  }, [settledForBook, perpAt, borosAt, livePerpLegs, liveBorosLegs, rows, entryRows, bookId]);
 
   // Perp-only cue: never claim "no Boros position" unless the strategy feed
   // has actually SETTLED successfully for the tracked address.
