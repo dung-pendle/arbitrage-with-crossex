@@ -145,7 +145,9 @@ const DEFAULTS: StoredControls = {
   customNotionalUsd: 10_000,
   borosEntry: 'market',
   entryMode: 'both-market',
-  exitMode: 'close',
+  // 'roll' by default — see StrategyCard: an assumed exit cost is a decision
+  // the user has not made yet, and it understates every quote.
+  exitMode: 'roll',
   feeTier: 'vip0',
 };
 
@@ -388,6 +390,7 @@ const OpportunityCard = memo(function OpportunityCard({
   pair,
   notionalUsd,
   onExecute,
+  onExecuteBoros,
   unconfigured,
 }: {
   /** The cohort the pair belongs to — collateral, maturity, underlying. */
@@ -397,8 +400,12 @@ const OpportunityCard = memo(function OpportunityCard({
   pair: OpportunityPair;
   /** The notional the RESPONSE priced — the waterfall converts APRs with it. */
   notionalUsd: number;
-  /** null when there is no trade-flow provider — the button then explains itself. */
-  onExecute: ((pair: OpportunityPair) => void) | null;
+  /** null when there is no trade-flow provider — the button then explains itself.
+   * `sizeBase` arms the perps in the Boros collateral when that IS the base
+   * coin, so both legs match without an eyeballed conversion. */
+  onExecute: ((pair: OpportunityPair, sizeBase?: number) => void) | null;
+  /** Arms the BOROS ticket with this pair's two rate legs. */
+  onExecuteBoros?: ((pair: OpportunityPair, maturitySec?: number) => void) | null;
   /** First-run view: symbols are expectedly absent, so Execute stays enabled
    * and clicking it nudges the setup guide instead of dead-ending. */
   unconfigured: boolean;
@@ -601,20 +608,53 @@ const OpportunityCard = memo(function OpportunityCard({
             >
               {open ? 'Hide details' : 'Details'}
             </button>
+            {/* PRIMARY — locking the fixed spread IS the trade; the perps only
+                hedge what this leg buys, so it comes first and hedging second.
+                Both carry the same identity as Details: many cards per cohort
+                now differ only by their legs. */}
             <button
               type="button"
               className="btn btn-primary px-4 font-semibold"
-              // Many cards per cohort now differ only by their legs, so the
-              // bare "Execute it" no longer identifies which trade is being
-              // staged — same identity the Details button carries.
-              aria-label={`Execute ${base} short ${prettyVenue(pair.shortLeg.venue)} / long ${prettyVenue(pair.longLeg.venue)}, ${group.collateral}-margined ${fmtDateUtc(group.maturity)}`}
+              aria-label={`Lock the rate for ${base} short ${prettyVenue(pair.shortLeg.venue)} / long ${prettyVenue(pair.longLeg.venue)}, ${group.collateral}-margined ${fmtDateUtc(group.maturity)}`}
               disabled={executeDisabled}
-              title={executeTitle}
-              onClick={() => onExecute?.(pair)}
+              title={
+                executeTitle ??
+                'Prefills the Boros ticket with both rate legs — this is the spread you are buying, so lock it first'
+              }
+              onClick={() => pair && onExecuteBoros?.(pair, group.maturity)}
             >
-              Execute it
+              Lock the rate
+            </button>
+            <button
+              type="button"
+              className="btn px-4 font-semibold"
+              aria-label={`Hedge the perps for ${base} short ${prettyVenue(pair.shortLeg.venue)} / long ${prettyVenue(pair.longLeg.venue)}, ${group.collateral}-margined ${fmtDateUtc(group.maturity)}`}
+              disabled={executeDisabled}
+              title={
+                executeTitle ?? 'Prefills the pair ticket with the two perp legs that hedge the spread'
+              }
+              onClick={() =>
+                // Size the perps in the Boros collateral when that IS the base
+                // coin, so the two legs match without an eyeballed conversion;
+                // USDT-margined cohorts keep the dollar figure.
+                pair &&
+                onExecute?.(
+                  pair,
+                  collateralQty && collateralQty.symbol.toUpperCase() === pair.base.toUpperCase()
+                    ? collateralQty.qty
+                    : undefined,
+                )
+              }
+            >
+              Hedge the perps
             </button>
           </div>
+          {/* The sequence, stated once under the pair rather than wedged
+              between the two buttons as a floating word. Hedging before the
+              spread is locked leaves you holding naked perp exposure. */}
+          <span className="mt-1 block text-right text-[10px] text-ink-500">
+            lock the rate first, then hedge
+          </span>
         </div>
 
         {open && (
@@ -846,15 +886,48 @@ export function OpportunitiesPanel({ unconfigured = false }: { unconfigured?: bo
   // Stable identity, or every card re-renders on each keystroke and the memo
   // above buys nothing.
   const execute = useCallback(
-    (pair: OpportunityPair) =>
+    (pair: OpportunityPair, sizeBase?: number) =>
       flow?.prefillPair({
         base: pair.base,
         longVenue: pair.longLeg.crossexVenue,
         shortVenue: pair.shortLeg.crossexVenue,
         notionalUsd: pricedNotionalUsd,
+        // Present only for token-margined cohorts, where the collateral IS the
+        // base coin and the perp can be sized in the same unit as the Boros leg.
+        ...(sizeBase !== undefined && sizeBase > 0
+          ? { sizeUnit: 'base' as const, sizeBase }
+          : {}),
         mode: entryMode === 'maker-hedge' ? 'maker' : 'market',
       }),
     [flow, pricedNotionalUsd, entryMode],
+  );
+
+  /**
+   * The other half of the trade this card describes.
+   *
+   * The Boros legs are named by their OWN venues (`longLeg.venue`), not the
+   * CrossEx ones the perps use — a card's Boros leg and its perp leg sit at
+   * the same venue but are addressed differently, and crossing the two would
+   * arm the ticket with markets that do not exist.
+   *
+   * Size travels as USD only: a card is priced at a USD notional and holds no
+   * base-coin quantity, so the ticket uses this figure on USD-collateral
+   * markets and leaves the field empty rather than inventing a conversion.
+   */
+  const executeBoros = useCallback(
+    (pair: OpportunityPair, maturitySec?: number) =>
+      flow?.prefillBorosOpen({
+        base: pair.base,
+        longVenue: pair.longLeg.venue,
+        shortVenue: pair.shortLeg.venue,
+        maturity: maturitySec,
+        // ⚠ Without this a venue+base match takes whichever maturity comes
+        // first, so the two legs can land on DIFFERENT expiries — and since
+        // each leg filters the other by maturity, both then vanish from their
+        // own dropdowns and the ticket looks empty and broken.
+        size: pricedNotionalUsd,
+      }),
+    [flow, pricedNotionalUsd],
   );
 
   const summary = assumptionsOpen
@@ -1100,6 +1173,7 @@ export function OpportunitiesPanel({ unconfigured = false }: { unconfigured?: bo
               pair={row.pair}
               notionalUsd={pricedNotionalUsd}
               onExecute={flow ? execute : null}
+              onExecuteBoros={flow ? executeBoros : null}
               unconfigured={unconfigured}
             />
           ))}

@@ -64,6 +64,13 @@ export function DataTable<T>({
             {rows.map((row) => {
               const k = rowKey(row);
               const isOpen = open.has(k);
+              // A row with nothing to expand into gets no chevron. The caller
+              // says so by returning null from renderExpanded — a placeholder
+              // row for a leg that is not open has no live position, no
+              // settlements and no membership, and a control that opens an
+              // empty drawer is a control that lies.
+              const expansion = renderExpanded?.(row) ?? null;
+              const rowExpandable = expandable && expansion !== null;
               return (
                 <Fragment key={k}>
                   <tr
@@ -73,21 +80,28 @@ export function DataTable<T>({
                   >
                     {expandable && (
                       <td className="py-1.5 pl-2">
-                        <button
-                          type="button"
-                          aria-label="toggle details"
-                          aria-expanded={isOpen}
-                          onClick={() => toggle(k)}
-                          className="rounded px-1 text-ink-400 transition-colors hover:text-ink-100"
-                        >
-                          {isOpen ? '▾' : '▸'}
-                        </button>
+                        {rowExpandable && (
+                          <button
+                            type="button"
+                            aria-label="toggle details"
+                            aria-expanded={isOpen}
+                            onClick={() => toggle(k)}
+                            className="rounded px-1 text-ink-400 transition-colors hover:text-ink-100"
+                          >
+                            {isOpen ? '▾' : '▸'}
+                          </button>
+                        )}
                       </td>
                     )}
                     {columns.map((c) => (
                       <td
                         key={c.key}
-                        className={`whitespace-nowrap px-3 py-1.5 align-middle ${
+                        // px-2: these tables now carry up to six columns inside
+                        // a fixed-width card, and px-3 pushed the last one past
+                        // the edge — the horizontal scroll saved the data but
+                        // put a row action out of reach, which is the opposite
+                        // of what a row action is for.
+                        className={`whitespace-nowrap px-2 py-1.5 align-middle ${
                           c.align === 'right' ? 'text-right' : 'text-left'
                         } ${c.className ?? ''}`}
                       >
@@ -95,10 +109,10 @@ export function DataTable<T>({
                       </td>
                     ))}
                   </tr>
-                  {isOpen && renderExpanded && (
+                  {isOpen && rowExpandable && (
                     <tr className="border-t border-ink-800 bg-ink-950/70">
                       <td colSpan={colSpan} className="px-4 py-3">
-                        {renderExpanded(row)}
+                        {expansion}
                       </td>
                     </tr>
                   )}

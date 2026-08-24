@@ -38,14 +38,6 @@ function closePreviewHandler() {
   });
 }
 
-/** Anchor the popover off a real button whose rect we control. */
-function anchorAt(rect: Partial<DOMRect>) {
-  const btn = document.createElement('button');
-  document.body.appendChild(btn);
-  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(rect as DOMRect);
-  return { current: btn };
-}
-
 describe('ClosePopover', () => {
   const viewportHeight = window.innerHeight;
   afterEach(() => {
@@ -53,37 +45,43 @@ describe('ClosePopover', () => {
     Object.defineProperty(window, 'innerHeight', { value: viewportHeight, configurable: true });
   });
 
-  it('clamps into the viewport when the trigger sits near the bottom of the page', async () => {
+  it('opens on this position\'s own size when the venue leg is shared', async () => {
+    // The venue holds 0.3; this strategy owns 0.1. A close acts on the whole
+    // position, so the popover must not default to closing someone else's.
     server.use(...baseHandlers(), closePreviewHandler());
-    // A 400px dialog hung off a button whose bottom edge is 40px from the foot
-    // of a 600px viewport: the naive `anchor.bottom + 6` put it at 566, so all
-    // but 34px of it hung off-screen where it could never be scrolled to.
-    Object.defineProperty(window, 'innerHeight', { value: 600, configurable: true });
-    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(400);
-    const anchorRef = anchorAt({ top: 540, bottom: 560, left: 460, right: 500 });
+    renderWithClient(
+      <ClosePopover
+        position={ethPosition}
+        attributedQty={0.1}
+       
+        onDismiss={() => {}}
+      />,
+    );
+    expect(await screen.findByRole('radio', { name: /partial/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByLabelText('Close qty')).toHaveValue('0.1');
+    expect(screen.getByText(/holds 0.1 of the 0.3 on the venue/)).toBeInTheDocument();
 
-    renderWithClient(<ClosePopover position={ethPosition} anchorRef={anchorRef} onDismiss={() => {}} />);
-
-    const dialog = await screen.findByRole('dialog', { name: `Close ${ethPosition.symbol}` });
-    // innerHeight - height - margin = 600 - 400 - 8, and right-aligned to the button.
-    expect(dialog).toHaveStyle({ top: '192px', left: '200px' });
+    // Switching to full spells out whose size goes with it.
+    fireEvent.click(screen.getByRole('radio', { name: /full/ }));
+    expect(screen.getByText(/including the 0.2 that belongs to your other position/)).toBeInTheDocument();
   });
 
-  it('anchors just below the trigger when there is room', async () => {
+  it('leaves an unshared position on full', async () => {
     server.use(...baseHandlers(), closePreviewHandler());
-    Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true });
-    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300);
-    const anchorRef = anchorAt({ top: 100, bottom: 120, left: 460, right: 500 });
-
-    renderWithClient(<ClosePopover position={ethPosition} anchorRef={anchorRef} onDismiss={() => {}} />);
-
-    const dialog = await screen.findByRole('dialog', { name: `Close ${ethPosition.symbol}` });
-    expect(dialog).toHaveStyle({ top: '126px' }); // anchor.bottom + 6, unclamped
+    renderWithClient(<ClosePopover position={ethPosition} onDismiss={() => {}} />);
+    expect(await screen.findByRole('radio', { name: /full/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.queryByText(/belongs to your other position/)).not.toBeInTheDocument();
   });
 
   it('previews a full close (marketable limit px + uPnL) with the reduce-only note', async () => {
     server.use(...baseHandlers(), closePreviewHandler());
-    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
+    renderWithClient(<ClosePopover position={ethPosition} onDismiss={() => {}} />);
 
     expect(await screen.findByText(/marketable limit px/)).toBeInTheDocument();
     expect(screen.getByText('2497.45')).toBeInTheDocument();
@@ -93,7 +91,7 @@ describe('ClosePopover', () => {
 
   it('partial qty above the position shows an inline error and disables Close', async () => {
     server.use(...baseHandlers(), closePreviewHandler());
-    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
+    renderWithClient(<ClosePopover position={ethPosition} onDismiss={() => {}} />);
     await screen.findByText(/marketable limit px/);
 
     await userEvent.click(screen.getByRole('radio', { name: 'partial' }));
@@ -113,7 +111,7 @@ describe('ClosePopover', () => {
         return HttpResponse.json(env({ id: dealCalls[0].id }), { status: 202 });
       }),
     );
-    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
+    renderWithClient(<ClosePopover position={ethPosition} onDismiss={() => {}} />);
 
     const btn = await screen.findByRole('button', { name: 'Close now ▸' });
     await waitFor(() => expect(btn).toBeEnabled());
@@ -131,7 +129,7 @@ describe('ClosePopover', () => {
 
   it('hovering "Close now" opens no review card — the preview box above already reviews it', async () => {
     server.use(...baseHandlers(), closePreviewHandler());
-    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
+    renderWithClient(<ClosePopover position={ethPosition} onDismiss={() => {}} />);
 
     const btn = await screen.findByRole('button', { name: 'Close now ▸' });
     await waitFor(() => expect(btn).toBeEnabled());
@@ -151,7 +149,7 @@ describe('ClosePopover', () => {
         ),
       ),
     );
-    renderWithClient(<ClosePopover position={ethPosition} anchorRef={null} onDismiss={() => {}} />);
+    renderWithClient(<ClosePopover position={ethPosition} onDismiss={() => {}} />);
 
     const btn = await screen.findByRole('button', { name: 'Close now ▸' });
     await waitFor(() => expect(btn).toBeEnabled());

@@ -30,6 +30,7 @@ import {
 import { env, server } from '../test/server';
 import { renderWithClient } from '../test/utils';
 import { PairTicket } from '../trade/PairTicket';
+import { TradeFlowProvider, useTradeFlow } from '../trade/TradeFlow';
 import { OPPORTUNITIES_STORAGE_KEY, OpportunitiesPanel } from './OpportunitiesPanel';
 import { OPPORTUNITY_FILTERS_STORAGE_KEY } from './opportunityFilters';
 
@@ -41,7 +42,9 @@ const paramsOf = (url: string) => Object.fromEntries(new URL(url).searchParams);
 /** The card's collapse toggle, one per group. */
 const toggles = () => screen.getAllByRole('button', { name: /^(Show|Hide) details for/ });
 
-const executeButtons = () => screen.getAllByRole('button', { name: /^Execute / });
+/** The hedge action. Its accessible name is the aria-label, which carries the
+ * card's identity — many cards per cohort differ only by their legs. */
+const executeButtons = () => screen.getAllByRole('button', { name: /^Hedge the perps / });
 
 /** Every knob lives inside the collapsed assumptions strip — open it first. */
 const openAssumptions = () =>
@@ -458,7 +461,9 @@ describe('OpportunitiesPanel — collapse', () => {
 
     await waitFor(() => expect(toggles()).toHaveLength(1));
     expect(screen.getByText('7.0% APR')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Execute ETH short Hyperliquid/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /^Hedge the perps for ETH short Hyperliquid/ }),
+    ).toBeInTheDocument();
     expect(toggles()[0]).toHaveTextContent('Details');
     expect(toggles()[0]).toHaveAttribute('aria-expanded', 'false');
     expect(container.querySelector('[data-waterfall]')).toBeNull();
@@ -668,7 +673,7 @@ describe('OpportunitiesPanel — the assumptions strip', () => {
       borosEntry: 'market',
       notionalUsd: '10000',
       entryMode: 'both-market',
-      exitMode: 'close',
+      exitMode: 'roll',
     });
     // Collapsed: the summary is on the button, the radios are not rendered.
     expect(screen.queryByRole('radiogroup', { name: 'Notional' })).not.toBeInTheDocument();
@@ -881,7 +886,7 @@ describe('OpportunitiesPanel — the assumptions strip', () => {
       notionalUsd: '25000',
       borosEntry: 'mark',
       entryMode: 'both-market',
-      exitMode: 'close',
+      exitMode: 'roll',
     });
 
     await openAssumptions();
@@ -910,7 +915,7 @@ describe('OpportunitiesPanel — empty and error states', () => {
     expect(await screen.findByText('No fixed-return opportunities')).toBeInTheDocument();
     expect(
       screen.getByText(
-        /\$10,000 notional with a Boros entry at market size, both legs market perp entry and close at maturity/,
+        /\$10,000 notional with a Boros entry at market size, both legs market perp entry and roll over/,
       ),
     ).toBeInTheDocument();
   });
@@ -983,6 +988,50 @@ function previewHandler(calls: ActionInput[][]) {
   });
 }
 
+describe('OpportunitiesPanel → Boros prefill', () => {
+  it('arms the Boros ticket with BOTH legs at the card\'s own maturity', async () => {
+    // Regression, twice over:
+    //  1. the maturity did not travel, so a venue+base match took whichever
+    //     expiry came first — the two legs landed on DIFFERENT maturities, and
+    //     since each leg filters the other by maturity, BOTH then vanished
+    //     from their own dropdowns and the ticket rendered empty;
+    //  2. an unresolved market left the PREVIOUS prefill's leg in place, which
+    //     filtered the other leg down to whatever could pair with the stale one.
+    server.use(
+      ...baseHandlers(),
+      ...symbolHandlers([ETH_HYPERLIQUID, ETH_BINANCE]),
+      opportunitiesHandler(makeOpportunitiesResult()),
+    );
+    const seen: Array<Record<string, unknown>> = [];
+    function Probe() {
+      const flow = useTradeFlow();
+      const p = flow.borosOpenPrefill;
+      if (p && !seen.some((x) => x.nonce === p.nonce)) seen.push({ ...p });
+      return null;
+    }
+    renderWithClient(
+      <TradeFlowProvider>
+        <OpportunitiesPanel />
+        <Probe />
+      </TradeFlowProvider>,
+    );
+
+    await waitFor(() => expect(toggles()).toHaveLength(1));
+    await userEvent.click(screen.getByRole('button', { name: /^Lock the rate for / }));
+
+    await waitFor(() => expect(seen).toHaveLength(1));
+    const sent = seen[0];
+    // Both venues travel — this opens the PAIR, not one leg.
+    expect(sent.longVenue).toBeTruthy();
+    expect(sent.shortVenue).toBeTruthy();
+    expect(sent.base).toBe('ETH');
+    // The pin: the cohort's maturity rides along, so the ticket cannot resolve
+    // the two legs to different expiries.
+    expect(typeof sent.maturity).toBe('number');
+    expect(sent.maturity).toBeGreaterThan(0);
+  });
+});
+
 describe('OpportunitiesPanel → PairTicket prefill', () => {
   it('arms the ticket with the size, the maker mode and the server-supplied legs', async () => {
     const calls: ActionInput[][] = [];
@@ -1004,10 +1053,12 @@ describe('OpportunitiesPanel → PairTicket prefill', () => {
     await openAssumptions();
     const panelModes = screen.getByRole('radiogroup', { name: 'Perp entry mode' });
     await userEvent.click(within(panelModes).getByRole('radio', { name: /Limit \+ hedge/ }));
-    await userEvent.click(screen.getByRole('button', { name: /^Execute ETH short Hyperliquid/ }));
+    await userEvent.click(
+      screen.getByRole('button', { name: /^Hedge the perps for ETH short Hyperliquid/ }),
+    );
 
     await waitFor(() =>
-      expect(screen.getByLabelText('Notional per leg (USDT)')).toHaveValue('10000'),
+      expect(screen.getByLabelText('Size per leg (USDT)')).toHaveValue('10000'),
     );
     const ticketModes = screen.getByRole('radiogroup', { name: 'Pair execution mode' });
     expect(within(ticketModes).getByRole('radio', { name: /Limit \+ hedge/ })).toHaveAttribute(
@@ -1178,7 +1229,7 @@ describe('OpportunitiesPanel → PairTicket prefill, runner-up pairs', () => {
 
     await waitFor(() => expect(toggles()).toHaveLength(2));
     // The RUNNER-UP — the card the old one-per-group list could not even show.
-    await userEvent.click(executeFor(/^Execute ETH short Hyperliquid \/ long Gate/));
+    await userEvent.click(executeFor(/^Hedge the perps for ETH short Hyperliquid \/ long Gate/));
 
     await waitFor(() => expect(calls.at(-1)).toHaveLength(2), { timeout: 4000 });
     const legs = calls.at(-1) as ActionInput[];

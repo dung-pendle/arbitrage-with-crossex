@@ -7,12 +7,22 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { del, fetchJson, postJson, putJson } from './client';
+import { uuid } from '../lib/uuid';
 import type {
+  BorosCancelAndCloseResult,
   DealAlert,
   DealView,
   BookTouch,
   BorosEntryMode,
+  BorosAgentInput,
+  BorosAgentStatus,
+  BorosPairContext,
+  BorosPairExecuteResponse,
+  BorosPairRequest,
+  BorosPairSimulateResponse,
+  CapitalBasis,
   CredentialsInfo,
   CredentialsInput,
   DisclaimerStatus,
@@ -43,7 +53,10 @@ export const qk = {
   symbols: (q: string) => ['symbols', q] as const,
   symbolsByBase: (base: string) => ['symbols', 'base', base] as const,
   symbolDetail: (symbol: string) => ['symbolDetail', symbol] as const,
-  strategy: (address: string, since: number | null) => ['strategy', address, since ?? ''] as const,
+  strategy: (address: string, since: number | null, partition = '', capital = 'balance') =>
+    ['strategy', address, since ?? '', partition, capital] as const,
+  borosAgent: ['boros', 'agent'] as const,
+  borosPairContext: (address: string) => ['boros', 'pair', 'context', address] as const,
   opportunities: (
     notionalUsd: number,
     borosEntry: BorosEntryMode,
@@ -115,10 +128,25 @@ export function useTrades(limit = 100) {
  * Deliberately NO keepPreviousData: after a Change to a different address the
  * old address's financial data must never render attributed to the new one
  * (same-key background polls keep data without it). */
-export function useStrategy(address: string | null, since: number | null = null) {
-  const search = since ? `?since=${since}` : '';
+export function useStrategy(
+  address: string | null,
+  since: number | null = null,
+  /** base64url pins from partitionStore — the user's edits to the split. */
+  partition = '',
+  /** 'im' counts only the margin the Boros legs post as capital. */
+  capital: CapitalBasis = 'balance',
+) {
+  const params = new URLSearchParams();
+  if (since) params.set('since', String(since));
+  if (partition) params.set('partition', partition);
+  if (capital !== 'balance') params.set('capital', capital);
+  // NOT params.size: it is Baseline-2023 (Safari 17), and where it is
+  // undefined the ternary would drop the whole query string — silently
+  // disabling the clock override and every pin.
+  const query = params.toString();
+  const search = query ? `?${query}` : '';
   return useQuery({
-    queryKey: qk.strategy(address ?? '', since),
+    queryKey: qk.strategy(address ?? '', since, partition, capital),
     queryFn: () => fetchJson<StrategyReturns>(`/strategy/${encodeURIComponent(address ?? '')}${search}`),
     enabled: Boolean(address),
     refetchInterval: 30_000,
@@ -254,13 +282,37 @@ export function useSymbolDetail(symbol: string | null) {
 
 /** Poll one deal every second while it works; stop at DONE (kept for review). */
 export function useDealView(id: string | null) {
-  return useQuery({
+  const qc = useQueryClient();
+  const settled = useRef<string | null>(null);
+  const query = useQuery({
     queryKey: qk.deal(id ?? ''),
     queryFn: () => fetchJson<DealView>(`/deals/${encodeURIComponent(id ?? '')}`),
     enabled: Boolean(id),
-    refetchInterval: (query) => (query.state.data?.pair.mode === 'DONE' ? false : 1_000),
+    refetchInterval: (q) => (q.state.data?.pair.mode === 'DONE' ? false : 1_000),
     refetchIntervalInBackground: true,
   });
+
+  /**
+   * ⚠ A finished deal must refresh the POSITION feeds.
+   *
+   * The poll stops at DONE and nothing else asked the position or strategy
+   * queries to re-read — so an order could fill, the modal could say it had,
+   * and the cards behind it would still show the pre-trade book until their
+   * own 4s/30s interval came round (or the user reloaded). The deal is the
+   * only thing that knows when the fill actually landed.
+   *
+   * Guarded by id so this fires ONCE per deal, not on every poll after DONE.
+   */
+  const mode = query.data?.pair.mode;
+  useEffect(() => {
+    if (!id || mode !== 'DONE' || settled.current === id) return;
+    settled.current = id;
+    void qc.invalidateQueries({ queryKey: qk.positions });
+    void qc.invalidateQueries({ queryKey: ['strategy'] });
+    void qc.invalidateQueries({ queryKey: qk.account });
+  }, [id, mode, qc]);
+
+  return query;
 }
 
 /** Venue touch for the re-peg decision UI — polls only while enabled. */
@@ -329,5 +381,125 @@ export function usePutCredentials() {
   return useMutation({
     mutationFn: (body: CredentialsInput) => putJson<CredentialsInfo>('/credentials', body),
     onSuccess: () => qc.invalidateQueries(), // credentials changed — everything is suspect
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Boros two-leg market entry
+// ---------------------------------------------------------------------------
+
+/** The pairable Boros universe plus this address's per-market state. Keyed by
+ * address: two addresses must never share positions or margin buckets. */
+export function useBorosPairContext(address: string | null) {
+  return useQuery({
+    queryKey: qk.borosPairContext(address ?? ''),
+    queryFn: () => fetchJson<BorosPairContext>(`/boros/pair/context?address=${address}`),
+    enabled: Boolean(address),
+    placeholderData: keepPreviousData,
+    refetchInterval: 15_000,
+  });
+}
+
+/**
+ * Live pair simulation. `refetchInterval` is deliberately well inside the
+ * server's `SIMULATION_MAX_AGE_MS`: a quote that ages out blocks confirm, so
+ * the panel must replace it before that happens rather than after.
+ *
+ * A POST behind useQuery rather than useMutation on purpose — this is a pure
+ * read that happens to need a body, and it has to poll.
+ */
+export function useBorosPairSimulation(req: BorosPairRequest | null, enabled = true) {
+  return useQuery({
+    // The whole request is the key: any field change is a different quote.
+    queryKey: ['boros', 'pair', 'simulate', JSON.stringify(req)] as const,
+    queryFn: () => postJson<BorosPairSimulateResponse>('/boros/pair/simulate', req),
+    enabled: Boolean(req) && enabled,
+    placeholderData: keepPreviousData,
+    refetchInterval: 4_000,
+    // A stale quote must never back a confirm, so don't serve one from cache
+    // across a remount.
+    gcTime: 0,
+  });
+}
+
+export function useExecuteBorosPair() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: BorosPairRequest) =>
+      postJson<BorosPairExecuteResponse>('/boros/pair/execute', req),
+    // ⚠ Same contract as the close below: the CARD reads the STRATEGY feed,
+    // not the pair context. Without ['strategy'] a leg that had just been
+    // opened did not appear until some other refetch happened to pull it in.
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['boros', 'pair', 'context'] });
+      void qc.invalidateQueries({ queryKey: ['strategy'] });
+      void qc.invalidateQueries({ queryKey: qk.positions });
+    },
+  });
+}
+
+/**
+ * §6A remediation: cancel every resting order on a market, then close it.
+ *
+ * The account is NOT sent — the server derives it from the agent key it signs
+ * with, because this route takes the close size from whatever position it
+ * reads. The id is minted per attempt: this route has no replay memo, and a
+ * retry after a failure is a genuinely new order.
+ */
+export function useBorosCancelAndClose() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      marketId,
+      size,
+      slippageApr,
+    }: {
+      marketId: number;
+      /** Omitted = close whatever is open. The server clamps to it either way. */
+      size?: number;
+      /** APR fraction; omitted = the server's default bound. */
+      slippageApr?: number;
+    }) =>
+      postJson<BorosCancelAndCloseResult>(`/boros/pair/market/${marketId}/cancel-and-close`, {
+        clientOrderId: `cx-${uuid()}`.slice(0, 64),
+        ...(size === undefined ? {} : { size }),
+        ...(slippageApr === undefined ? {} : { slippageApr }),
+      }),
+    // ⚠ The CARD reads the strategy feed, not the pair context. Invalidating
+    // only the context left a closed leg on screen at its old size until the
+    // user reloaded — the close had happened, the page just never re-asked.
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['boros', 'pair', 'context'] });
+      void qc.invalidateQueries({ queryKey: ['strategy'] });
+      void qc.invalidateQueries({ queryKey: qk.positions });
+    },
+  });
+}
+
+/** The delegated Boros trading key's status. Cheap and read often — the ticket
+ * gates its confirm on it. */
+export function useBorosAgent() {
+  return useQuery({
+    queryKey: qk.borosAgent,
+    queryFn: () => fetchJson<BorosAgentStatus>('/boros/agent'),
+    staleTime: 10_000,
+  });
+}
+
+export function useProvisionBorosAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: BorosAgentInput) => putJson<BorosAgentStatus>('/boros/agent', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.borosAgent }),
+  });
+}
+
+/** Forgets the key on THIS machine. Does not revoke the on-chain approval —
+ * the server's response says so and the UI repeats it. */
+export function useForgetBorosAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => del<{ configured: boolean; note: string }>('/boros/agent'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.borosAgent }),
   });
 }

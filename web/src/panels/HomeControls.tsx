@@ -6,10 +6,10 @@
  * (The exit toggles moved into each StrategyCard — per-position, not global.)
  */
 import { useId, useState, type FormEvent } from 'react';
-import type { StrategyReturns } from '../api/types';
+import type { CapitalBasis, StrategyReturns } from '../api/types';
 import { FreshnessButton } from '../components/FreshnessIndicator';
 import { SignedNumber } from '../components/SignedNumber';
-import { fmtPct, fmtUsd } from '../lib/fmt';
+import { fmtUsd } from '../lib/fmt';
 import { readJson } from '../lib/storage';
 import { applyCostFlags, type CostFlags } from './strategyMath';
 
@@ -18,8 +18,21 @@ export const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
 export interface Stored {
   address: string | null;
-  /** Custom APR-clock start (unix seconds); null = default (Boros open). */
-  since: number | null;
+  /**
+   * Custom APR-clock start (unix seconds), PER WALLET — absent = default
+   * (Boros open).
+   *
+   * ⚠ Not a single value. The clock anchors on when the Boros legs locked the
+   * spread, which is a fact about one wallet's book; as a scalar it survived a
+   * switch and measured the new book's realized return from the old book's
+   * start date. Keyed by the wallet rather than the whole book id, so rotating
+   * a Gate API key does not throw the override away.
+   */
+  sinceByAddress: Record<string, number>;
+  /** How much capital a Boros position is said to tie up. Persisted (not
+   * per-card session state) because it describes the ACCOUNT — whether that
+   * collateral is dedicated to these positions — not a way of viewing one. */
+  capitalBasis: CapitalBasis;
 }
 
 /** Read the persisted shape (legacy exit-flag keys are ignored — the exit
@@ -27,14 +40,38 @@ export interface Stored {
 export function loadStored(): Stored {
   return readJson<Stored>(
     STRATEGY_STORAGE_KEY,
-    { address: null, since: null },
+    { address: null, sinceByAddress: {}, capitalBasis: 'im' },
     (parsed) => {
-      const p = parsed as { address?: unknown; since?: unknown } | null;
+      const p = parsed as {
+        address?: unknown;
+        since?: unknown;
+        sinceByAddress?: unknown;
+        capitalBasis?: unknown;
+      } | null;
       const address =
         typeof p?.address === 'string' && EVM_ADDRESS_RE.test(p.address) ? p.address : null;
-      const since =
-        typeof p?.since === 'number' && Number.isFinite(p.since) && p.since > 0 ? p.since : null;
-      return { address, since };
+      const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+
+      const sinceByAddress: Record<string, number> = {};
+      const raw = p?.sinceByAddress;
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+          if (ok(v)) sinceByAddress[k.toLowerCase()] = v;
+        }
+      }
+      // A scalar `since` was written before the override was per-wallet. It
+      // belonged to whichever address was tracked at the time, which is the
+      // one stored beside it — so it migrates there rather than being applied
+      // to every book the user opens next.
+      if (ok(p?.since) && address) sinceByAddress[address.toLowerCase()] ??= p.since;
+
+      // Anything but the explicit opt-in reads as the default, so a payload
+      // written by an older build keeps the numbers it was showing.
+      // Defaults to 'im' (margin used): the posted balance over-states capital
+      // whenever the collateral account is shared with other trading, which
+      // makes every APR on the page read lower than the trade actually earns.
+      const capitalBasis: CapitalBasis = p?.capitalBasis === 'balance' ? 'balance' : 'im';
+      return { address, sinceByAddress, capitalBasis };
     },
   );
 }
@@ -139,7 +176,10 @@ const FLAGS_ON: CostFlags = { inclExitFees: true, inclExitSlippage: true, inclEn
 
 export function TotalsStrip({ data }: { data: StrategyReturns }) {
   const flags = FLAGS_ON; // totals always include known future exit costs
-  const { totals, strategies } = data;
+  const { totals } = data;
+  // The same population the server summed the totals over: the arb book.
+  // Unhedged cards render beside it but are not Boros-tracked returns.
+  const strategies = data.strategies.filter((s) => s.attribution.source !== 'unhedged');
   const weightedElapsed =
     totals.capitalUsd > 0
       ? strategies.reduce((s, x) => s + x.capitalUsd * (x.elapsedSeconds ?? 0), 0) / totals.capitalUsd
@@ -173,14 +213,21 @@ export function TotalsStrip({ data }: { data: StrategyReturns }) {
         Current PnL{' '}
         <SignedNumber value={totals.realizedPnlUsd} format={(n) => fmtUsd(n)} className="font-medium" />
       </span>
-      <span className="text-ink-400">
-        Realized APR{' '}
-        {totals.realizedApr === null ? (
-          <span className="num text-ink-400">—</span>
-        ) : (
-          <SignedNumber value={totals.realizedApr} format={(n) => fmtPct(n)} className="font-medium" />
-        )}
-      </span>
+      {/* No "Realized APR" here, deliberately.
+       *
+       * It was aggregate realized PnL over capital, extrapolated to a year:
+       * × (SECONDS_IN_YEAR / weightedElapsed), with no floor on how short that
+       * window could be. At 13 hours that multiplies by ~674 and at 2 hours by
+       * ~4380, so a few cents of funding noise on a small base rendered as a
+       * three-digit APR that moved on every poll. Two independent UX testers
+       * named it the fastest way to distrust every other number on the page.
+       *
+       * Removed rather than floored: a run of hours cannot be annualized into
+       * anything a trader can act on, so there is no window at which the figure
+       * becomes meaningful enough to keep. `Current PnL` is the honest version
+       * of the same question, and the per-card FIXED APY — suppressed until
+       * every leg is in place — is the honest version of the rate one.
+       */}
       <span className="text-ink-400">
         Capital <span className="num font-medium text-ink-100">{fmtUsd(totals.capitalUsd, 0)}</span>
       </span>

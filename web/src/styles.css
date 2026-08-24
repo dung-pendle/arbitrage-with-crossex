@@ -94,7 +94,7 @@
   }
 
   .th {
-    @apply sticky top-0 z-10 whitespace-nowrap border-b border-ink-700 bg-ink-900 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-ink-400;
+    @apply sticky top-0 z-10 whitespace-nowrap border-b border-ink-700 bg-ink-900 px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-ink-400;
   }
 
   /* Secondary action next to a .btn-primary (the cards' "Details" toggle). */
@@ -105,6 +105,14 @@
   /* Cyan-active segmented control — the opportunity assumptions knobs. */
   .seg-cyan .seg-btn[data-active='true'] {
     @apply bg-cyan-500/15 text-cyan-300;
+  }
+
+  /* Rose-active segmented control — a control whose ACTIVE option reduces a
+     position (the Boros ticket's Close intent). Applied only while that option
+     is the live one, so the tint marks what is selected rather than colouring
+     the control permanently. */
+  .seg-rose .seg-btn[data-active='true'] {
+    @apply bg-rose-500/15 text-rose-300;
   }
 
   /* Ring that flashes around the credentials form when a card's Execute lands. */

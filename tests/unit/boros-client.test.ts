@@ -62,7 +62,7 @@ describe('fetchBorosMarkets', () => {
               marketId: 155,
               tokenId: 3,
               imData: { name: 'Hyperliquid ETH 31 Jul 2026', maturity: 1785456000 },
-              config: { takerFee: '500000000000000' },
+              config: { takerFee: '500000000000000', maxRateDeviationFactorBase1e4: 2500 },
               extConfig: { settleFeeRate: '1000000000000000', paymentPeriod: 3600 },
               metadata: { platformName: 'Hyperliquid', assetSymbol: 'ETH' },
               data: {
@@ -82,6 +82,10 @@ describe('fetchBorosMarkets', () => {
     expect(markets[0].notionalOi).toBe(801.005045896532); // collateral units, NOT USD
     expect(markets[0].takerFeeRate).toBeCloseTo(0.0005, 12);
     expect(markets[0].state).toBe('Normal');
+    // maxRateDeviation is a FRACTION OF THE MARK, not the deviation itself:
+    // 2500/1e4 = 0.25, and 0.25 x 7.6% = 1.9% APR. Reading the factor as the
+    // cap directly would have quoted 25%.
+    expect(markets[0].maxRateDeviationApr).toBeCloseTo(0.019, 12);
   });
 
   it('normalizes the initial-margin inputs (kIM is 18-dec, tThresh comes off config)', async () => {
@@ -238,7 +242,7 @@ describe('fetchBorosTransactions pagination', () => {
     const TOTAL = 450;
     const all = Array.from({ length: TOTAL }, (_, i) => txn(100 + i, 1_700_000_000 + i));
     const requestedSkips: number[] = [];
-    const txns = await fetchBorosTransactions(
+    const { txns } = await fetchBorosTransactions(
       stub((url) => {
         const skip = Number(url.searchParams.get('skip'));
         const limit = Number(url.searchParams.get('limit'));
@@ -256,7 +260,7 @@ describe('fetchBorosTransactions pagination', () => {
 
   it('stops after one page when total fits in the first fetch', async () => {
     let calls = 0;
-    const txns = await fetchBorosTransactions(
+    const { txns } = await fetchBorosTransactions(
       stub(() => {
         calls += 1;
         return { body: { results: [txn(1, 1)], total: 1 } };
@@ -270,7 +274,7 @@ describe('fetchBorosTransactions pagination', () => {
 
   it('stops on an empty page even if total lies, and caps runaway pagination', async () => {
     let calls = 0;
-    const txns = await fetchBorosTransactions(
+    const { txns } = await fetchBorosTransactions(
       stub(() => {
         calls += 1;
         return { body: { results: [], total: 999_999 } }; // server bug: total never reachable
@@ -287,12 +291,42 @@ describe('fetchBorosTransactions pagination', () => {
       fetchBorosTransactions(stub(() => ({ body: { total: 10 } })), ADDR, 3),
     ).rejects.toMatchObject({ name: 'CoreError', category: 'network' });
   });
+
+  it('reports coverage: complete when it reaches the venue count', async () => {
+    const { complete } = await fetchBorosTransactions(
+      stub(() => ({ body: { results: [txn(1, 1)], total: 1 } })),
+      ADDR,
+      3,
+    );
+    expect(complete).toBe(true);
+  });
+
+  it('reports coverage: INCOMPLETE when the page cap cuts it short', async () => {
+    // 25 pages × 200 is the runaway guard. An account past it used to get a
+    // silently truncated history — and truncation fakes absence, which is what
+    // any "no counterpart nearby, so it was placed alone" reasoning rests on.
+    const { txns, complete } = await fetchBorosTransactions(
+      stub((url) => {
+        const skip = Number(url.searchParams.get('skip'));
+        return {
+          body: {
+            results: Array.from({ length: 200 }, (_, i) => txn(skip + i, 1_700_000_000 + skip + i)),
+            total: 1_000_000,
+          },
+        };
+      }),
+      ADDR,
+      3,
+    );
+    expect(complete).toBe(false);
+    expect(txns).toHaveLength(25 * 200);
+  });
 });
 
 describe('resolveCollateralPricesUsd', () => {
   it('prices stables at 1, token collateral via a same-asset market, unknown as null', () => {
     const mk = (tokenId: number, base: string, px: number) =>
-      ({ marketId: tokenId * 100, tokenId, name: '', venue: '', base, maturity: 0, paymentPeriod: 0, settleFeeApr: 0, markApr: 0, floatingApr: 0, midApr: 0, notionalOi: 0, takerFeeRate: 0, state: 'Normal', assetMarkPriceUsd: px, kIM: 0, imTickThresh: 0, imTickStep: 0, tThreshSec: 0 }) as const;
+      ({ marketId: tokenId * 100, tokenId, name: '', venue: '', base, maturity: 0, paymentPeriod: 0, settleFeeApr: 0, markApr: 0, floatingApr: 0, midApr: 0, notionalOi: 0, takerFeeRate: 0, state: 'Normal', assetMarkPriceUsd: px, kIM: 0, imTickThresh: 0, imTickStep: 0, tThreshSec: 0, maxRateDeviationApr: 0 }) as const;
     const prices = resolveCollateralPricesUsd([
       { ...mk(3, 'HYPE', 40) }, // USDT-margined HYPE book
       { ...mk(1, 'BTC', 118_000) }, // BTC-margined BTC book
