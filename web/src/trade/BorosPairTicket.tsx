@@ -42,6 +42,7 @@ import { HoldToConfirmButton } from '../components/HoldToConfirmButton';
 import { QueryError } from '../components/QueryError';
 import { SegmentedToggle } from '../components/SegmentedToggle';
 import { amountError } from '../lib/amount';
+import { isUsdCollateral } from '../lib/boros';
 import { useNow } from '../lib/useNow';
 import { uuid } from '../lib/uuid';
 import { useTrackedAddressOptional } from '../panels/trackedAddress';
@@ -85,8 +86,31 @@ const newOrderIds = () => ({ a: `a-${uuid()}`, b: `b-${uuid()}` });
 
 /** `active` = the ticket is the visible venue. A hidden-but-mounted ticket
  * (see TradeRail) keeps its report and completion state but stops polling the
- * simulation — a quote nobody can see should not cost a request every 4s. */
-export function BorosPairTicket({ active = true }: { active?: boolean } = {}) {
+ * simulation — a quote nobody can see should not cost a request every 4s.
+ * `onExecuted` fires on every accepted execution (full, partial, or a
+ * completion) with the venue's result — the wizard advances its step off it. */
+export function BorosPairTicket({
+  active = true,
+  onExecuted,
+  onBusyChange,
+}: {
+  active?: boolean;
+  /**
+   * The collateral travels WITH the result: it is what the size figures are
+   * denominated in, and the caller (the wizard) renders its own receipt from
+   * these. Re-deriving it there could disagree with the ticket that traded.
+   */
+  onExecuted?: (result: BorosPairResult, collateral: string) => void;
+  /**
+   * True while an execution is in flight. The surface hosting this ticket
+   * (wizard modal, order-ticket drawer) locks its close controls off it:
+   * unmounting mid-execution skips the mutate-level onSuccess, so the fill
+   * report — including a partial fill's Complete/Unwind remediation — and the
+   * replay-protection order ids would die with the component while the order
+   * executes at the venue regardless.
+   */
+  onBusyChange?: (busy: boolean) => void;
+} = {}) {
   const tracked = useTrackedAddressOptional();
   const agent = useBorosAgent();
 
@@ -147,10 +171,10 @@ export function BorosPairTicket({ active = true }: { active?: boolean } = {}) {
     // ticket) was dropped and the ticket just sat empty. `marketsReady` in the
     // deps re-runs it the moment the list is there.
     if (!openNonce || !openPrefill || markets.length === 0) return;
-    const pick = (venue: string | null) =>
+    const at = (venue: string | null) =>
       venue === null
-        ? undefined
-        : markets.find(
+        ? []
+        : markets.filter(
             (m) =>
               m.venue.toUpperCase() === venue.toUpperCase() &&
               m.base.toUpperCase() === openPrefill.base.toUpperCase() &&
@@ -158,8 +182,42 @@ export function BorosPairTicket({ active = true }: { active?: boolean } = {}) {
               // wrong one gives two legs that cannot pair with each other.
               (openPrefill.maturity === undefined || m.maturity === openPrefill.maturity),
           );
-    const long = pick(openPrefill.longVenue);
-    const short = pick(openPrefill.shortVenue);
+    const longAt = at(openPrefill.longVenue);
+    const shortAt = at(openPrefill.shortVenue);
+    /**
+     * ⚠ Resolve the two legs TOGETHER, on a maturity they SHARE.
+     *
+     * Taking each leg's first match independently is a bug the caller cannot
+     * fix from outside: the cue that opens a card's missing Boros legs has no
+     * maturity to send (that card has no Boros legs, so its maturity is the 0
+     * sentinel), and the venues then land wherever their own list order puts
+     * them. Observed live: Gate lists exactly one ETH market (25 Sep) while
+     * Hyperliquid lists 25 Dec FIRST — so the ticket armed Gate-Sep against
+     * HL-Dec, a pair that cannot trade. Each leg then filtered the other out
+     * of its own dropdown and the ticket reported "different maturity" about
+     * a pair the user never chose.
+     *
+     * The intersection is both the fix and the honest answer: when the two
+     * venues share no maturity there is no pair to arm, and leaving the legs
+     * unresolved beats arming an impossible one.
+     *
+     * Soonest shared maturity wins — the nearest expiry is the liquid one.
+     */
+    type Market = (typeof markets)[number];
+    const soonest = (ms: Market[]): Market | undefined =>
+      [...ms].sort((a, b) => a.maturity - b.maturity)[0];
+    let long: Market | undefined;
+    let short: Market | undefined;
+    if (longAt.length > 0 && shortAt.length > 0) {
+      const shortMaturities = new Set(shortAt.map((m) => m.maturity));
+      long = soonest(longAt.filter((m) => shortMaturities.has(m.maturity)));
+      short = long ? shortAt.find((m) => m.maturity === long!.maturity) : undefined;
+    } else {
+      // Single-leg prefills: only one side was asked for, so there is nothing
+      // to agree with and the soonest at that venue is the right default.
+      long = soonest(longAt);
+      short = soonest(shortAt);
+    }
     /**
      * One venue = one leg. A missing-leg row asks for exactly the leg it is
      * missing, so opening a PAIR here would silently create a second position
@@ -204,8 +262,7 @@ export function BorosPairTicket({ active = true }: { active?: boolean } = {}) {
      * Unknown collateral leaves the field empty rather than guessing.
      */
     const picked = long ?? short;
-    const unit = picked?.collateral ?? '';
-    const usdPegged = unit === 'USDT' || unit === 'USDC';
+    const usdPegged = isUsdCollateral(picked?.collateral);
     const chosen = usdPegged ? openPrefill.size : openPrefill.sizeBase;
     setSizeStr(chosen !== undefined && chosen > 0 ? String(Number(chosen.toPrecision(8))) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -314,6 +371,29 @@ export function BorosPairTicket({ active = true }: { active?: boolean } = {}) {
   };
   const aprA = pctToApr(perLeg ? slipStrA : slipStrShared, seededShared);
   const aprB = pctToApr(perLeg ? slipStrB : slipStrShared, seededShared);
+  /**
+   * ⚠ Say when the typed number is not the sent number.
+   *
+   * `pctToApr` clamps to MAX_SLIP_PCT, so typing 50 left "50" on screen while
+   * 10 went on the wire — and because the client clamped first, the server's
+   * own guard ("silently coercing a bad value would set the rate bound the
+   * order actually carries, so it is rejected instead", borosPair.ts) could
+   * never fire. The clamp stays as the last line of defence; this makes the
+   * disagreement visible instead of silent.
+   */
+  const slipOutOfRange = (raw: string): boolean => {
+    // ⚠ Two-sided on purpose. Flagging only the too-large direction left the
+    // other half of the same dishonesty in place: a typed zero, negative, or
+    // cleared value fell through to `pctToApr`'s fallback and the order went
+    // out carrying the SEEDED default as its rate bound — a bound the user
+    // explicitly did not choose, with nothing on screen saying so. (The boxes
+    // are seeded, so an empty value only exists after a deliberate clear.)
+    const n = Number(raw);
+    return raw.trim() === '' || !Number.isFinite(n) || n <= 0 || n > MAX_SLIP_PCT;
+  };
+  const slipInvalid = perLeg
+    ? slipOutOfRange(slipStrA) || slipOutOfRange(slipStrB)
+    : slipOutOfRange(slipStrShared);
 
   const request = useMemo<BorosPairRequest | null>(() => {
     /**
@@ -380,6 +460,20 @@ export function BorosPairTicket({ active = true }: { active?: boolean } = {}) {
   const execute = useExecuteBorosPair();
   const cancelClose = useBorosCancelAndClose();
 
+  // Tell the host surface an execution is in flight, so it can lock its close
+  // controls (see the prop doc). Cleared on unmount so a host never stays
+  // locked by a ticket that is gone. A follow-up could make an interrupted
+  // execution genuinely recoverable — persist the in-flight order ids the way
+  // pendingBasket.ts does and re-POST on remount to hit the server's replay
+  // memo — but while the report lives only in this component, blocking the
+  // close is what keeps a live fill visible.
+  const busy = execute.isPending;
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy]);
+
   /**
    * Freshness is judged HERE, not by the server's gate.
    *
@@ -404,6 +498,14 @@ export function BorosPairTicket({ active = true }: { active?: boolean } = {}) {
 
   const blockers = [
     ...(gate?.blockers ?? []),
+    ...(slipInvalid
+      ? [
+          {
+            code: 'slippage-out-of-range',
+            message: `Max slippage must be greater than 0 and at most ${MAX_SLIP_PCT}% APR — the order would otherwise carry a rate bound you did not choose.`,
+          },
+        ]
+      : []),
     ...(quoteStale
       ? [{ code: 'stale-simulation', message: 'The quote is out of date — waiting for a fresh one.' }]
       : []),
@@ -429,6 +531,8 @@ export function BorosPairTicket({ active = true }: { active?: boolean } = {}) {
         onSuccess: (res) => {
           setReport(res.result);
           setReportReplayed(Boolean(res.replayed));
+          // A replay is the EARLIER submission's result — it already fired.
+          if (!res.replayed) onExecuted?.(res.result, simulation?.collateral ?? '');
           setAcknowledged(false);
           // This execution is DONE — the ids have served their replay-protection
           // purpose. Fresh ones now, so a later confirm of the same unchanged
@@ -745,7 +849,22 @@ export function BorosPairTicket({ active = true }: { active?: boolean } = {}) {
             setOrderIds(newOrderIds());
             setReport(null);
           }}
-          onDismiss={() => setReport(null)}
+          onDismiss={() => {
+            /**
+             * ⚠ Clear the size with the report.
+             *
+             * Dismiss returns the ticket to its ordinary armed state, and
+             * `sizeStr` still held the ORIGINAL request — so on a partial fill
+             * the Confirm underneath came back armed for the WHOLE pair, on
+             * top of the part that had already filled. (Fresh order ids mean
+             * the replay guard does not cover it.) The size that produced this
+             * report has been spent; re-entering one is the point of
+             * dismissing rather than using Complete or Retry, which set their
+             * own sizes.
+             */
+            setSizeStr('');
+            setReport(null);
+          }}
         />
       )}
 
