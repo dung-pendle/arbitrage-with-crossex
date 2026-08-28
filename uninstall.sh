@@ -2,7 +2,7 @@
 #
 # Arbitrage with CrossEx — macOS uninstaller.
 #
-#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/pendle-finance/arbitrage-with-crossex/main/uninstall.sh)"
+#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/dung-pendle/arbitrage-with-crossex/main/uninstall.sh)"
 #
 # Removes the background service, the app, and its private Node.js runtime.
 # Your API keys (~/.boros-crossex/config) and trade history (~/.boros-crossex/data)

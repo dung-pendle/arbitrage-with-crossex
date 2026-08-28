@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Arbitrage with CrossEx \u2014 monitoring + trading UI for Gate.io CrossEx",
   "license": "MIT",
-  "repository": "github:pendle-finance/arbitrage-with-crossex",
+  "repository": "github:dung-pendle/arbitrage-with-crossex",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

@@ -43,7 +43,7 @@ const manualRoute = () => fireEvent.click(screen.getByRole('radio', { name: 'Run
 /** An install-info block, so a test can say which commit is being served. */
 function installedAt(commit: string): UpdateStatus['install'] {
   return {
-    repo: 'pendle-finance/arbitrage-with-crossex',
+    repo: 'dung-pendle/arbitrage-with-crossex',
     requestedRef: 'refs/heads/main',
     commit,
     source: 'github-archive',
@@ -95,7 +95,7 @@ describe('UpdateIndicator', () => {
     expect([INSTALL_CMD, INSTALL_CMD_WINDOWS].filter((c) => screen.queryByText(c))).toHaveLength(0);
     expect(screen.getByRole('link', { name: /Full changelog/ })).toHaveAttribute(
       'href',
-      'https://github.com/pendle-finance/arbitrage-with-crossex/blob/main/CHANGELOG.md',
+      'https://github.com/dung-pendle/arbitrage-with-crossex/blob/main/CHANGELOG.md',
     );
   });
 
@@ -116,7 +116,7 @@ describe('UpdateIndicator', () => {
   it('links the diff from the installed commit', async () => {
     await openModal({
       install: {
-        repo: 'pendle-finance/arbitrage-with-crossex',
+        repo: 'dung-pendle/arbitrage-with-crossex',
         requestedRef: 'main',
         commit: 'abc1234',
         source: 'install.sh',
@@ -125,7 +125,7 @@ describe('UpdateIndicator', () => {
     });
     expect(screen.getByRole('link', { name: /code changes/ })).toHaveAttribute(
       'href',
-      'https://github.com/pendle-finance/arbitrage-with-crossex/compare/abc1234...main',
+      'https://github.com/dung-pendle/arbitrage-with-crossex/compare/abc1234...main',
     );
   });
 
@@ -133,7 +133,7 @@ describe('UpdateIndicator', () => {
     await openModal();
     expect(screen.getByRole('link', { name: /code changes/ })).toHaveAttribute(
       'href',
-      'https://github.com/pendle-finance/arbitrage-with-crossex/commits/main',
+      'https://github.com/dung-pendle/arbitrage-with-crossex/commits/main',
     );
   });
 
@@ -142,7 +142,7 @@ describe('UpdateIndicator', () => {
     await openModal({
       latestCommit: sha,
       install: {
-        repo: 'pendle-finance/arbitrage-with-crossex',
+        repo: 'dung-pendle/arbitrage-with-crossex',
         requestedRef: 'main',
         commit: 'abc1234',
         source: 'install.sh',
@@ -152,7 +152,7 @@ describe('UpdateIndicator', () => {
 
     expect(screen.getByRole('link', { name: /code changes/ })).toHaveAttribute(
       'href',
-      `https://github.com/pendle-finance/arbitrage-with-crossex/compare/abc1234...${sha}`,
+      `https://github.com/dung-pendle/arbitrage-with-crossex/compare/abc1234...${sha}`,
     );
     // The command the user pastes is the one on the landing page and in the
     // README. A 40-character ref in front of it is a sha to check against a
