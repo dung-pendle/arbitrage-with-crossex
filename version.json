@@ -1,6 +1,6 @@
 {
-  "version": "1.5.1",
+  "version": "1.5.2",
   "highlights": [
-    "The spread breakdown opens clean. A grey tooltip used to sit across its first leg row"
+    "Windows: an update no longer opens a console window mid-install, and it starts even when your laptop is on battery"
   ]
 }
