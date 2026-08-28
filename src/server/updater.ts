@@ -4,9 +4,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 const INSTALL_CMD =
-  '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/pendle-finance/arbitrage-with-crossex/main/install.sh)"';
+  '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/dung-pendle/arbitrage-with-crossex/main/install.sh)"';
 const INSTALLER_URL_WINDOWS =
-  'https://raw.githubusercontent.com/pendle-finance/arbitrage-with-crossex/main/install.ps1';
+  'https://raw.githubusercontent.com/dung-pendle/arbitrage-with-crossex/main/install.ps1';
 /** Dev/test override, same family as install.ps1's own BOROS_* knobs: a URL, or
  * a path to a local install.ps1 so the whole flow can be exercised offline. */
 const INSTALLER_SOURCE_WINDOWS = (): string =>

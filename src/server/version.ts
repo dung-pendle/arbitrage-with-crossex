@@ -13,9 +13,9 @@ import * as path from 'node:path';
 import type { FetchLike } from '../core/boros/client';
 
 export const VERSION_URL =
-  'https://raw.githubusercontent.com/pendle-finance/arbitrage-with-crossex/main/version.json';
+  'https://raw.githubusercontent.com/dung-pendle/arbitrage-with-crossex/main/version.json';
 export const COMMIT_URL =
-  'https://api.github.com/repos/pendle-finance/arbitrage-with-crossex/git/ref/heads/main';
+  'https://api.github.com/repos/dung-pendle/arbitrage-with-crossex/git/ref/heads/main';
 export const COMMIT_SHA = /^[0-9a-f]{40}$/;
 const FETCH_TIMEOUT_MS = 5_000;
 /** Cap on remote highlights — the modal is a nudge, not a changelog. */
